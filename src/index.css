@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── Base typography — slightly larger than default ─────────────────────────── */
+html {
+  font-size: 16px;          /* browser default, explicit */
+}
+
+body {
+  background: #f4f6f9;
+  font-family: 'DM Sans', 'Plus Jakarta Sans', sans-serif;
+  font-size: 0.9375rem;     /* 15px — one step up from Tailwind's 14px sm default */
+  line-height: 1.55;
+  color: #0f172a;
+  overflow: hidden;
+  height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Twin3D fullscreen page needs its own scroll behaviour */
+body:has(#twin3d-root) {
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* ── Tailwind font-size overrides — bump every utility 1 step ──────────────── */
+/* Tailwind uses rem so bumping html font-size is cleaner — but we also nudge  */
+/* the micro sizes used in labels upward so they stay readable.                */
+.text-\[9px\]  { font-size: 0.6875rem !important; }   /* 9 → 11px  */
+.text-\[10px\] { font-size: 0.75rem   !important; }   /* 10 → 12px */
+.text-\[11px\] { font-size: 0.8125rem !important; }   /* 11 → 13px */
+.text-\[12px\] { font-size: 0.875rem  !important; }   /* 12 → 14px */
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+/* ── Utilities ───────────────────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.nav-gradient {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+}
+
+.emergency-gradient {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
