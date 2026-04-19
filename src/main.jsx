@@ -14,6 +14,7 @@ import DeviceTwin     from './pages/DeviceTwin';
 import Alerts         from './pages/Alerts';
 import Analytics      from './pages/Analytics';
 import Twin3DPage     from './pages/Twin3DPage';
+import OntologyGraph  from './pages/OntologyGraph';
 
 function ProtectedLayout({ pageTitle, children }) {
     return (
@@ -64,6 +65,11 @@ function App() {
                     <Route path="/analytics" element={
                         <ProtectedLayout pageTitle="Analytics & Reports">
                             <Analytics />
+                        </ProtectedLayout>
+                    } />
+                    <Route path="/ontology" element={
+                        <ProtectedLayout pageTitle="Ontology Graph">
+                            <OntologyGraph />
                         </ProtectedLayout>
                     } />
 

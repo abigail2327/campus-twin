@@ -1,164 +1,113 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+/**
+ * Analytics.jsx — Phase 3 MVP
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Selectable AI-driven chart views scoped to the 3 active nodes:
+ *   Node 1 — Classroom 1   (PIR motion, lighting)
+ *   Node 2 — Classroom 2   (ambient lux, lighting)
+ *   Node 3 — Lecture Hall  (temperature, CO₂, occupancy, HVAC)
+ *
+ * Professor feedback implemented:
+ *   ✓ Charts show AI predictions overlaid on sensor readings
+ *   ✓ User selects which view to see (temperature / occupancy / energy / lighting)
+ *   ✓ Each chart type shows only the relevant rooms/nodes
+ *   ✓ AI prediction bands and confidence shown alongside raw data
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import { useState, useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import Icon from '../components/panels/Icon';
+import { useLiveSensorState } from '../services/sensorState';
 import { exportEnergyData, exportFullReport } from '../services/exportService';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SYNTHETIC DATA — computed from 235,881 rows across 9 rooms (Sept–Dec 2025)
-// Phase 3: replace with Firebase onValue() subscriptions — components unchanged
-// ─────────────────────────────────────────────────────────────────────────────
+// ── AI prediction engine (rule-based until ML model is connected) ─────────────
+// These functions mirror the logic the Random Forest model will implement.
+// When the model is trained, replace these with model inference calls.
 
-// Temperature readings: Sept 15 2025, every 30 min, all 9 rooms
-const RAW_TEMP_DATA = [
-    {timestamp:'2025-09-15T00:00:00',room:'Classroom_1',temperature_c:23.43,co2_ppm:416.8,occupancy_pct:2.1,humidity_pct:49.3,power_w:13.6},
-    {timestamp:'2025-09-15T00:00:00',room:'Classroom_2',temperature_c:22.97,co2_ppm:411.2,occupancy_pct:1.8,humidity_pct:47.1,power_w:14.1},
-    {timestamp:'2025-09-15T00:00:00',room:'Computer_Lab',temperature_c:24.21,co2_ppm:398.4,occupancy_pct:1.2,humidity_pct:45.9,power_w:464.2},
-    {timestamp:'2025-09-15T00:00:00',room:'Large_Lecture_Hall',temperature_c:23.78,co2_ppm:422.1,occupancy_pct:0.9,humidity_pct:51.2,power_w:18.4},
-    {timestamp:'2025-09-15T00:00:00',room:'Lobby_Reception',temperature_c:22.52,co2_ppm:407.7,occupancy_pct:0.0,humidity_pct:48.3,power_w:43.6},
-    {timestamp:'2025-09-15T00:00:00',room:'Lounge_Study',temperature_c:23.11,co2_ppm:414.3,occupancy_pct:1.4,humidity_pct:50.1,power_w:22.8},
-    {timestamp:'2025-09-15T00:00:00',room:'Faculty_Office',temperature_c:22.88,co2_ppm:401.5,occupancy_pct:1.2,humidity_pct:49.7,power_w:6.4},
-    {timestamp:'2025-09-15T00:00:00',room:'Mechanical_Room',temperature_c:25.31,co2_ppm:388.2,occupancy_pct:1.3,humidity_pct:36.4,power_w:312.1},
-    {timestamp:'2025-09-15T00:00:00',room:'Electrical_Room',temperature_c:24.65,co2_ppm:398.1,occupancy_pct:7.2,humidity_pct:49.9,power_w:133.2},
-    {timestamp:'2025-09-15T00:30:00',room:'Classroom_1',temperature_c:23.51,co2_ppm:418.2,occupancy_pct:2.0,humidity_pct:49.1,power_w:13.8},
-    {timestamp:'2025-09-15T00:30:00',room:'Classroom_2',temperature_c:23.04,co2_ppm:413.0,occupancy_pct:1.9,humidity_pct:47.5,power_w:14.7},
-    {timestamp:'2025-09-15T00:30:00',room:'Computer_Lab',temperature_c:24.42,co2_ppm:399.1,occupancy_pct:0.5,humidity_pct:45.8,power_w:465.1},
-    {timestamp:'2025-09-15T00:30:00',room:'Large_Lecture_Hall',temperature_c:23.91,co2_ppm:424.3,occupancy_pct:0.9,humidity_pct:51.4,power_w:18.2},
-    {timestamp:'2025-09-15T00:30:00',room:'Lobby_Reception',temperature_c:22.61,co2_ppm:408.9,occupancy_pct:0.0,humidity_pct:48.5,power_w:44.1},
-    {timestamp:'2025-09-15T06:00:00',room:'Classroom_1',temperature_c:23.21,co2_ppm:420.1,occupancy_pct:1.3,humidity_pct:49.8,power_w:13.2},
-    {timestamp:'2025-09-15T06:00:00',room:'Classroom_2',temperature_c:22.84,co2_ppm:415.7,occupancy_pct:1.4,humidity_pct:47.9,power_w:14.4},
-    {timestamp:'2025-09-15T06:00:00',room:'Computer_Lab',temperature_c:23.98,co2_ppm:401.2,occupancy_pct:1.3,humidity_pct:46.2,power_w:462.8},
-    {timestamp:'2025-09-15T06:00:00',room:'Large_Lecture_Hall',temperature_c:23.54,co2_ppm:426.8,occupancy_pct:1.3,humidity_pct:51.8,power_w:17.9},
-    {timestamp:'2025-09-15T07:00:00',room:'Classroom_1',temperature_c:23.11,co2_ppm:419.3,occupancy_pct:1.3,humidity_pct:49.6,power_w:13.1},
-    {timestamp:'2025-09-15T07:00:00',room:'Lobby_Reception',temperature_c:22.88,co2_ppm:421.4,occupancy_pct:10.5,humidity_pct:48.9,power_w:52.3},
-    {timestamp:'2025-09-15T07:30:00',room:'Lobby_Reception',temperature_c:23.12,co2_ppm:438.7,occupancy_pct:18.4,humidity_pct:49.2,power_w:58.1},
-    {timestamp:'2025-09-15T08:00:00',room:'Classroom_1',temperature_c:23.62,co2_ppm:512.4,occupancy_pct:60.3,humidity_pct:52.1,power_w:28.4},
-    {timestamp:'2025-09-15T08:00:00',room:'Classroom_2',temperature_c:23.31,co2_ppm:489.2,occupancy_pct:7.4,humidity_pct:49.8,power_w:22.1},
-    {timestamp:'2025-09-15T08:00:00',room:'Computer_Lab',temperature_c:24.11,co2_ppm:498.7,occupancy_pct:7.2,humidity_pct:47.3,power_w:892.4},
-    {timestamp:'2025-09-15T08:00:00',room:'Large_Lecture_Hall',temperature_c:24.21,co2_ppm:531.2,occupancy_pct:7.2,humidity_pct:53.4,power_w:42.8},
-    {timestamp:'2025-09-15T08:00:00',room:'Lobby_Reception',temperature_c:23.44,co2_ppm:462.3,occupancy_pct:51.1,humidity_pct:50.1,power_w:71.2},
-    {timestamp:'2025-09-15T08:00:00',room:'Lounge_Study',temperature_c:23.52,co2_ppm:487.4,occupancy_pct:34.5,humidity_pct:51.8,power_w:48.1},
-    {timestamp:'2025-09-15T08:30:00',room:'Classroom_1',temperature_c:24.18,co2_ppm:648.2,occupancy_pct:83.7,humidity_pct:56.2,power_w:48.2},
-    {timestamp:'2025-09-15T08:30:00',room:'Classroom_2',temperature_c:23.88,co2_ppm:621.4,occupancy_pct:63.1,humidity_pct:53.2,power_w:38.7},
-    {timestamp:'2025-09-15T08:30:00',room:'Computer_Lab',temperature_c:24.72,co2_ppm:712.3,occupancy_pct:63.0,humidity_pct:49.4,power_w:2841.2},
-    {timestamp:'2025-09-15T08:30:00',room:'Large_Lecture_Hall',temperature_c:24.84,co2_ppm:689.4,occupancy_pct:63.2,humidity_pct:57.1,power_w:88.4},
-    {timestamp:'2025-09-15T08:30:00',room:'Lobby_Reception',temperature_c:23.71,co2_ppm:498.1,occupancy_pct:16.7,humidity_pct:51.4,power_w:62.4},
-    {timestamp:'2025-09-15T08:30:00',room:'Faculty_Office',temperature_c:23.42,co2_ppm:598.3,occupancy_pct:63.1,humidity_pct:52.8,power_w:18.2},
-    {timestamp:'2025-09-15T09:00:00',room:'Classroom_1',temperature_c:24.41,co2_ppm:724.1,occupancy_pct:7.2,humidity_pct:54.8,power_w:22.1},
-    {timestamp:'2025-09-15T09:00:00',room:'Classroom_2',temperature_c:24.12,co2_ppm:698.7,occupancy_pct:87.7,humidity_pct:57.4,power_w:52.8},
-    {timestamp:'2025-09-15T09:00:00',room:'Computer_Lab',temperature_c:25.14,co2_ppm:841.2,occupancy_pct:68.3,humidity_pct:51.2,power_w:4821.3},
-    {timestamp:'2025-09-15T09:00:00',room:'Large_Lecture_Hall',temperature_c:25.31,co2_ppm:812.4,occupancy_pct:36.6,humidity_pct:59.2,power_w:68.2},
-    {timestamp:'2025-09-15T09:00:00',room:'Lounge_Study',temperature_c:24.11,co2_ppm:612.8,occupancy_pct:46.1,humidity_pct:54.2,power_w:61.4},
-    {timestamp:'2025-09-15T09:00:00',room:'Faculty_Office',temperature_c:23.81,co2_ppm:724.2,occupancy_pct:71.1,humidity_pct:54.1,power_w:24.8},
-    {timestamp:'2025-09-15T09:30:00',room:'Classroom_1',temperature_c:24.62,co2_ppm:748.2,occupancy_pct:63.1,humidity_pct:57.2,power_w:38.4},
-    {timestamp:'2025-09-15T09:30:00',room:'Classroom_2',temperature_c:24.31,co2_ppm:712.4,occupancy_pct:36.4,humidity_pct:55.8,power_w:32.1},
-    {timestamp:'2025-09-15T09:30:00',room:'Computer_Lab',temperature_c:25.48,co2_ppm:921.3,occupancy_pct:7.4,humidity_pct:52.8,power_w:1241.2},
-    {timestamp:'2025-09-15T10:00:00',room:'Classroom_1',temperature_c:24.82,co2_ppm:761.4,occupancy_pct:87.6,humidity_pct:59.1,power_w:54.2},
-    {timestamp:'2025-09-15T10:00:00',room:'Classroom_2',temperature_c:24.52,co2_ppm:728.9,occupancy_pct:50.3,humidity_pct:57.2,power_w:41.8},
-    {timestamp:'2025-09-15T10:00:00',room:'Computer_Lab',temperature_c:25.82,co2_ppm:1024.7,occupancy_pct:60.4,humidity_pct:54.1,power_w:3812.4},
-    {timestamp:'2025-09-15T10:00:00',room:'Large_Lecture_Hall',temperature_c:25.71,co2_ppm:948.2,occupancy_pct:63.1,humidity_pct:61.4,power_w:92.4},
-    {timestamp:'2025-09-15T10:00:00',room:'Lounge_Study',temperature_c:24.48,co2_ppm:682.4,occupancy_pct:51.7,humidity_pct:56.4,power_w:72.8},
-    {timestamp:'2025-09-15T10:00:00',room:'Faculty_Office',temperature_c:24.21,co2_ppm:812.4,occupancy_pct:68.4,humidity_pct:55.8,power_w:28.2},
-    {timestamp:'2025-09-15T10:30:00',room:'Classroom_1',temperature_c:25.01,co2_ppm:742.8,occupancy_pct:50.2,humidity_pct:58.4,power_w:42.4},
-    {timestamp:'2025-09-15T10:30:00',room:'Classroom_2',temperature_c:24.72,co2_ppm:714.3,occupancy_pct:87.5,humidity_pct:58.9,power_w:54.1},
-    {timestamp:'2025-09-15T11:00:00',room:'Classroom_1',temperature_c:24.84,co2_ppm:698.1,occupancy_pct:9.4,humidity_pct:56.8,power_w:22.8},
-    {timestamp:'2025-09-15T11:00:00',room:'Classroom_2',temperature_c:24.51,co2_ppm:681.4,occupancy_pct:87.5,humidity_pct:58.2,power_w:52.4},
-    {timestamp:'2025-09-15T11:00:00',room:'Computer_Lab',temperature_c:25.64,co2_ppm:912.8,occupancy_pct:83.9,humidity_pct:53.9,power_w:6214.8},
-    {timestamp:'2025-09-15T11:00:00',room:'Large_Lecture_Hall',temperature_c:25.54,co2_ppm:898.4,occupancy_pct:63.1,humidity_pct:62.8,power_w:88.1},
-    {timestamp:'2025-09-15T11:30:00',room:'Classroom_1',temperature_c:24.71,co2_ppm:674.2,occupancy_pct:87.7,humidity_pct:57.4,power_w:52.8},
-    {timestamp:'2025-09-15T11:30:00',room:'Classroom_2',temperature_c:24.38,co2_ppm:642.8,occupancy_pct:50.4,humidity_pct:57.4,power_w:42.1},
-    {timestamp:'2025-09-15T12:00:00',room:'Classroom_1',temperature_c:24.44,co2_ppm:618.3,occupancy_pct:7.3,humidity_pct:55.9,power_w:18.4},
-    {timestamp:'2025-09-15T12:00:00',room:'Classroom_2',temperature_c:24.12,co2_ppm:598.4,occupancy_pct:7.3,humidity_pct:56.2,power_w:18.2},
-    {timestamp:'2025-09-15T12:00:00',room:'Computer_Lab',temperature_c:25.31,co2_ppm:824.7,occupancy_pct:7.4,humidity_pct:52.8,power_w:1842.1},
-    {timestamp:'2025-09-15T12:00:00',room:'Large_Lecture_Hall',temperature_c:25.21,co2_ppm:812.4,occupancy_pct:7.1,humidity_pct:61.4,power_w:42.8},
-    {timestamp:'2025-09-15T12:00:00',room:'Lounge_Study',temperature_c:24.82,co2_ppm:712.8,occupancy_pct:51.7,humidity_pct:57.8,power_w:78.4},
-    {timestamp:'2025-09-15T13:00:00',room:'Classroom_1',temperature_c:24.84,co2_ppm:698.4,occupancy_pct:87.7,humidity_pct:58.4,power_w:54.2},
-    {timestamp:'2025-09-15T13:00:00',room:'Classroom_2',temperature_c:24.48,co2_ppm:672.8,occupancy_pct:63.0,humidity_pct:57.8,power_w:42.8},
-    {timestamp:'2025-09-15T13:00:00',room:'Computer_Lab',temperature_c:25.71,co2_ppm:1124.8,occupancy_pct:63.0,humidity_pct:54.2,power_w:5824.4},
-    {timestamp:'2025-09-15T13:30:00',room:'Classroom_1',temperature_c:25.08,co2_ppm:718.2,occupancy_pct:50.3,humidity_pct:59.1,power_w:42.8},
-    {timestamp:'2025-09-15T13:30:00',room:'Classroom_2',temperature_c:24.72,co2_ppm:684.2,occupancy_pct:87.5,humidity_pct:59.4,power_w:54.1},
-    {timestamp:'2025-09-15T14:00:00',room:'Classroom_1',temperature_c:25.18,co2_ppm:724.8,occupancy_pct:87.7,humidity_pct:60.2,power_w:54.8},
-    {timestamp:'2025-09-15T14:00:00',room:'Classroom_2',temperature_c:24.88,co2_ppm:698.4,occupancy_pct:9.5,humidity_pct:59.8,power_w:22.1},
-    {timestamp:'2025-09-15T14:00:00',room:'Computer_Lab',temperature_c:25.91,co2_ppm:1198.2,occupancy_pct:71.1,humidity_pct:54.9,power_w:8241.4},
-    {timestamp:'2025-09-15T14:00:00',room:'Large_Lecture_Hall',temperature_c:25.84,co2_ppm:1042.8,occupancy_pct:68.4,humidity_pct:63.8,power_w:112.4},
-    {timestamp:'2025-09-15T14:00:00',room:'Faculty_Office',temperature_c:24.54,co2_ppm:898.4,occupancy_pct:98.8,humidity_pct:57.4,power_w:34.2},
-    {timestamp:'2025-09-15T14:30:00',room:'Classroom_1',temperature_c:25.04,co2_ppm:712.1,occupancy_pct:42.5,humidity_pct:59.8,power_w:38.4},
-    {timestamp:'2025-09-15T14:30:00',room:'Classroom_2',temperature_c:24.71,co2_ppm:682.4,occupancy_pct:87.5,humidity_pct:59.2,power_w:54.2},
-    {timestamp:'2025-09-15T15:00:00',room:'Classroom_1',temperature_c:25.28,co2_ppm:742.8,occupancy_pct:95.0,humidity_pct:61.2,power_w:62.4},
-    {timestamp:'2025-09-15T15:00:00',room:'Classroom_2',temperature_c:24.94,co2_ppm:718.4,occupancy_pct:87.5,humidity_pct:60.4,power_w:54.8},
-    {timestamp:'2025-09-15T15:00:00',room:'Computer_Lab',temperature_c:26.14,co2_ppm:1284.7,occupancy_pct:68.4,humidity_pct:55.8,power_w:9184.2},
-    {timestamp:'2025-09-15T15:00:00',room:'Large_Lecture_Hall',temperature_c:26.02,co2_ppm:1124.8,occupancy_pct:95.1,humidity_pct:64.8,power_w:148.2},
-    {timestamp:'2025-09-15T15:30:00',room:'Classroom_1',temperature_c:25.12,co2_ppm:728.4,occupancy_pct:50.3,humidity_pct:60.8,power_w:42.8},
-    {timestamp:'2025-09-15T15:30:00',room:'Classroom_2',temperature_c:24.81,co2_ppm:702.8,occupancy_pct:50.3,humidity_pct:59.8,power_w:42.4},
-    {timestamp:'2025-09-15T16:00:00',room:'Classroom_1',temperature_c:25.44,co2_ppm:762.4,occupancy_pct:68.5,humidity_pct:61.8,power_w:54.2},
-    {timestamp:'2025-09-15T16:00:00',room:'Classroom_2',temperature_c:25.11,co2_ppm:738.2,occupancy_pct:63.2,humidity_pct:60.8,power_w:48.4},
-    {timestamp:'2025-09-15T16:00:00',room:'Computer_Lab',temperature_c:26.28,co2_ppm:1342.8,occupancy_pct:95.0,humidity_pct:56.4,power_w:13248.4},
-    {timestamp:'2025-09-15T16:00:00',room:'Large_Lecture_Hall',temperature_c:26.18,co2_ppm:1198.4,occupancy_pct:43.1,humidity_pct:65.4,power_w:88.4},
-    {timestamp:'2025-09-15T16:00:00',room:'Lounge_Study',temperature_c:25.14,co2_ppm:812.4,occupancy_pct:41.3,humidity_pct:58.8,power_w:68.4},
-    {timestamp:'2025-09-15T16:30:00',room:'Classroom_1',temperature_c:25.08,co2_ppm:724.8,occupancy_pct:9.4,humidity_pct:60.4,power_w:22.8},
-    {timestamp:'2025-09-15T16:30:00',room:'Computer_Lab',temperature_c:26.08,co2_ppm:1284.2,occupancy_pct:68.4,humidity_pct:55.9,power_w:8421.4},
-    {timestamp:'2025-09-15T17:00:00',room:'Classroom_1',temperature_c:24.74,co2_ppm:668.2,occupancy_pct:7.2,humidity_pct:59.4,power_w:18.4},
-    {timestamp:'2025-09-15T17:00:00',room:'Classroom_2',temperature_c:24.44,co2_ppm:641.8,occupancy_pct:36.5,humidity_pct:58.8,power_w:32.4},
-    {timestamp:'2025-09-15T17:00:00',room:'Computer_Lab',temperature_c:25.82,co2_ppm:1214.8,occupancy_pct:7.3,humidity_pct:55.2,power_w:1842.4},
-    {timestamp:'2025-09-15T17:00:00',room:'Large_Lecture_Hall',temperature_c:25.72,co2_ppm:1048.2,occupancy_pct:68.4,humidity_pct:64.2,power_w:108.4},
-    {timestamp:'2025-09-15T17:30:00',room:'Classroom_2',temperature_c:24.18,co2_ppm:614.2,occupancy_pct:87.8,humidity_pct:58.1,power_w:52.8},
-    {timestamp:'2025-09-15T17:30:00',room:'Large_Lecture_Hall',temperature_c:25.48,co2_ppm:1012.4,occupancy_pct:95.1,humidity_pct:63.8,power_w:148.2},
-    {timestamp:'2025-09-15T18:00:00',room:'Classroom_1',temperature_c:24.24,co2_ppm:598.4,occupancy_pct:1.6,humidity_pct:57.8,power_w:14.2},
-    {timestamp:'2025-09-15T18:00:00',room:'Classroom_2',temperature_c:23.94,co2_ppm:572.8,occupancy_pct:1.8,humidity_pct:57.2,power_w:14.8},
-    {timestamp:'2025-09-15T18:00:00',room:'Computer_Lab',temperature_c:25.24,co2_ppm:1024.8,occupancy_pct:1.8,humidity_pct:54.2,power_w:462.4},
-    {timestamp:'2025-09-15T18:00:00',room:'Large_Lecture_Hall',temperature_c:25.11,co2_ppm:912.4,occupancy_pct:1.8,humidity_pct:62.8,power_w:18.4},
-    {timestamp:'2025-09-15T18:00:00',room:'Lounge_Study',temperature_c:24.48,co2_ppm:712.4,occupancy_pct:35.0,humidity_pct:57.8,power_w:58.4},
-    {timestamp:'2025-09-15T19:00:00',room:'Classroom_1',temperature_c:23.84,co2_ppm:542.4,occupancy_pct:1.8,humidity_pct:56.4,power_w:13.8},
-    {timestamp:'2025-09-15T19:00:00',room:'Classroom_2',temperature_c:23.54,co2_ppm:518.2,occupancy_pct:1.8,humidity_pct:55.8,power_w:14.2},
-    {timestamp:'2025-09-15T20:00:00',room:'Classroom_1',temperature_c:23.51,co2_ppm:498.4,occupancy_pct:1.8,humidity_pct:55.2,power_w:13.4},
-    {timestamp:'2025-09-15T20:00:00',room:'Classroom_2',temperature_c:23.21,co2_ppm:474.2,occupancy_pct:1.8,humidity_pct:54.4,power_w:13.8},
-    {timestamp:'2025-09-15T22:00:00',room:'Classroom_1',temperature_c:23.28,co2_ppm:448.2,occupancy_pct:1.8,humidity_pct:53.8,power_w:13.2},
-    {timestamp:'2025-09-15T22:00:00',room:'Classroom_2',temperature_c:22.98,co2_ppm:428.4,occupancy_pct:1.7,humidity_pct:53.1,power_w:14.1},
-    {timestamp:'2025-09-15T22:00:00',room:'Computer_Lab',temperature_c:24.52,co2_ppm:432.8,occupancy_pct:1.9,humidity_pct:47.8,power_w:464.8},
-    {timestamp:'2025-09-15T23:00:00',room:'Classroom_1',temperature_c:23.14,co2_ppm:432.4,occupancy_pct:1.9,humidity_pct:53.2,power_w:13.1},
-    {timestamp:'2025-09-15T23:30:00',room:'Classroom_1',temperature_c:23.02,co2_ppm:421.8,occupancy_pct:1.8,humidity_pct:52.8,power_w:13.0},
-    {timestamp:'2025-09-15T23:30:00',room:'Large_Lecture_Hall',temperature_c:23.84,co2_ppm:448.4,occupancy_pct:1.8,humidity_pct:53.4,power_w:18.1},
+function predictOccupancy(temp, co2, motion, lux, hour, isScheduled) {
+    // 0 = unoccupied, 1 = scheduled, 2 = unscheduled
+    if (isScheduled && (motion || co2 > 600)) return 1;
+    if (!isScheduled && (motion || co2 > 700)) return 2; // unscheduled alert
+    if (co2 < 450 && !motion) return 0;
+    return 0;
+}
+
+function predictEnergyMode(occupancy, hour) {
+    // 'active' | 'standby' | 'off'
+    if (occupancy > 0) return 'active';
+    if (hour >= 7 && hour <= 20) return 'standby';
+    return 'off';
+}
+
+function predictLighting(motion, lux, css, lcs) {
+    if (lcs === 'ON') return true;
+    if (!css) return false;
+    if (motion && lux < 300) return true;
+    if (lux > 600) return false;
+    return motion;
+}
+
+// ── MVP node data (Sept 15 2025, 30-min intervals) ───────────────────────────
+// Scoped to Classroom 1 (Node 1), Classroom 2 (Node 2), Lecture Hall (Node 3)
+const MVP_DATA = [
+    // Timestamps: 00:00 to 23:30 on Sept 15 (a Tuesday — class day)
+    // Format: { t, cr1_temp, cr1_motion, cr1_lux, cr2_temp, cr2_lux, lh_temp, lh_co2, lh_occ, lh_fan, scheduled }
+    { t:'00:00', cr1_temp:23.1, cr1_motion:false, cr1_lux:5,   cr2_temp:22.8, cr2_lux:4,   lh_temp:23.4, lh_co2:398,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'00:30', cr1_temp:23.0, cr1_motion:false, cr1_lux:5,   cr2_temp:22.7, cr2_lux:4,   lh_temp:23.3, lh_co2:395,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'01:00', cr1_temp:22.9, cr1_motion:false, cr1_lux:5,   cr2_temp:22.6, cr2_lux:4,   lh_temp:23.2, lh_co2:392,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'06:00', cr1_temp:22.8, cr1_motion:false, cr1_lux:40,  cr2_temp:22.5, cr2_lux:80,  lh_temp:23.1, lh_co2:400,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'07:00', cr1_temp:23.0, cr1_motion:false, cr1_lux:120, cr2_temp:22.7, cr2_lux:200, lh_temp:23.3, lh_co2:408,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'07:30', cr1_temp:23.1, cr1_motion:false, cr1_lux:180, cr2_temp:22.8, cr2_lux:280, lh_temp:23.4, lh_co2:415,  lh_occ:5,  lh_fan:40,  sched:false },
+    { t:'08:00', cr1_temp:23.6, cr1_motion:true,  cr1_lux:320, cr2_temp:23.1, cr2_lux:380, lh_temp:24.1, lh_co2:512,  lh_occ:42, lh_fan:40,  sched:true  },
+    { t:'08:30', cr1_temp:24.2, cr1_motion:true,  cr1_lux:380, cr2_temp:23.6, cr2_lux:420, lh_temp:24.8, lh_co2:689,  lh_occ:78, lh_fan:100, sched:true  },
+    { t:'09:00', cr1_temp:24.4, cr1_motion:false, cr1_lux:410, cr2_temp:24.1, cr2_lux:450, lh_temp:25.3, lh_co2:812,  lh_occ:85, lh_fan:100, sched:true  },
+    { t:'09:30', cr1_temp:24.6, cr1_motion:true,  cr1_lux:440, cr2_temp:24.3, cr2_lux:470, lh_temp:25.5, lh_co2:948,  lh_occ:88, lh_fan:100, sched:true  },
+    { t:'10:00', cr1_temp:24.8, cr1_motion:true,  cr1_lux:460, cr2_temp:24.5, cr2_lux:490, lh_temp:25.7, lh_co2:1012, lh_occ:91, lh_fan:100, sched:true  },
+    { t:'10:30', cr1_temp:25.0, cr1_motion:true,  cr1_lux:480, cr2_temp:24.7, cr2_lux:510, lh_temp:25.8, lh_co2:1124, lh_occ:93, lh_fan:100, sched:true  },
+    { t:'11:00', cr1_temp:24.8, cr1_motion:false, cr1_lux:490, cr2_temp:24.8, cr2_lux:520, lh_temp:25.6, lh_co2:1080, lh_occ:89, lh_fan:100, sched:true  },
+    { t:'11:30', cr1_temp:24.7, cr1_motion:true,  cr1_lux:500, cr2_temp:24.6, cr2_lux:530, lh_temp:25.5, lh_co2:1020, lh_occ:85, lh_fan:100, sched:true  },
+    { t:'12:00', cr1_temp:24.4, cr1_motion:false, cr1_lux:520, cr2_temp:24.1, cr2_lux:550, lh_temp:25.2, lh_co2:820,  lh_occ:12, lh_fan:40,  sched:false },
+    { t:'12:30', cr1_temp:24.1, cr1_motion:false, cr1_lux:510, cr2_temp:23.8, cr2_lux:540, lh_temp:24.9, lh_co2:712,  lh_occ:8,  lh_fan:40,  sched:false },
+    { t:'13:00', cr1_temp:24.8, cr1_motion:true,  cr1_lux:490, cr2_temp:24.4, cr2_lux:510, lh_temp:25.1, lh_co2:698,  lh_occ:62, lh_fan:100, sched:true  },
+    { t:'13:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:470, cr2_temp:24.7, cr2_lux:490, lh_temp:25.4, lh_co2:812,  lh_occ:75, lh_fan:100, sched:true  },
+    { t:'14:00', cr1_temp:25.2, cr1_motion:true,  cr1_lux:450, cr2_temp:24.8, cr2_lux:460, lh_temp:25.8, lh_co2:1042, lh_occ:85, lh_fan:100, sched:true  },
+    { t:'14:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:420, cr2_temp:24.7, cr2_lux:430, lh_temp:25.6, lh_co2:1012, lh_occ:82, lh_fan:100, sched:true  },
+    { t:'15:00', cr1_temp:25.3, cr1_motion:true,  cr1_lux:380, cr2_temp:24.9, cr2_lux:390, lh_temp:26.0, lh_co2:1198, lh_occ:92, lh_fan:100, sched:true  },
+    { t:'15:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:340, cr2_temp:24.8, cr2_lux:350, lh_temp:25.8, lh_co2:1142, lh_occ:88, lh_fan:100, sched:true  },
+    { t:'16:00', cr1_temp:25.4, cr1_motion:true,  cr1_lux:290, cr2_temp:25.1, cr2_lux:300, lh_temp:26.2, lh_co2:1284, lh_occ:93, lh_fan:100, sched:true  },
+    { t:'16:30', cr1_temp:25.1, cr1_motion:false, cr1_lux:240, cr2_temp:24.8, cr2_lux:250, lh_temp:25.7, lh_co2:1048, lh_occ:12, lh_fan:40,  sched:false },
+    { t:'17:00', cr1_temp:24.7, cr1_motion:false, cr1_lux:180, cr2_temp:24.4, cr2_lux:190, lh_temp:25.2, lh_co2:812,  lh_occ:8,  lh_fan:40,  sched:false },
+    { t:'17:30', cr1_temp:24.4, cr1_motion:false, cr1_lux:120, cr2_temp:24.1, cr2_lux:130, lh_temp:24.8, lh_co2:698,  lh_occ:5,  lh_fan:40,  sched:false },
+    { t:'18:00', cr1_temp:24.1, cr1_motion:false, cr1_lux:60,  cr2_temp:23.8, cr2_lux:65,  lh_temp:24.4, lh_co2:582,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'18:30', cr1_temp:23.8, cr1_motion:false, cr1_lux:20,  cr2_temp:23.5, cr2_lux:25,  lh_temp:24.1, lh_co2:498,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'19:00', cr1_temp:23.5, cr1_motion:false, cr1_lux:8,   cr2_temp:23.2, cr2_lux:10,  lh_temp:23.8, lh_co2:442,  lh_occ:0,  lh_fan:0,   sched:false },
+    { t:'22:00', cr1_temp:23.2, cr1_motion:false, cr1_lux:5,   cr2_temp:22.9, cr2_lux:5,   lh_temp:23.4, lh_co2:412,  lh_occ:0,  lh_fan:0,   sched:false },
 ];
 
-// Energy data: avg daily consumption per room (Wh) computed from 3-month dataset
-const ENERGY_DATA = [
-    {room:'Classroom_1',       energy_wh:221.2},
-    {room:'Classroom_2',       energy_wh:225.5},
-    {room:'Computer_Lab',      energy_wh:13408.6},
-    {room:'Electrical_Room',   energy_wh:3731.6},
-    {room:'Faculty_Office',    energy_wh:77.0},
-    {room:'Large_Lecture_Hall',energy_wh:358.8},
-    {room:'Lobby_Reception',   energy_wh:594.8},
-    {room:'Lounge_Study',      energy_wh:378.0},
-    {room:'Mechanical_Room',   energy_wh:4578.6},
-];
+// Enrich with AI predictions
+const ENRICHED = MVP_DATA.map(d => {
+    const hour = parseInt(d.t.split(':')[0]);
+    const lhOccClass  = predictOccupancy(d.lh_temp, d.lh_co2, false, 0, hour, d.sched);
+    const cr1OccClass = predictOccupancy(d.cr1_temp, 420, d.cr1_motion, d.cr1_lux, hour, d.sched);
+    const cr2OccClass = predictOccupancy(d.cr2_temp, 420, false, d.cr2_lux, hour, d.sched);
+    return {
+        ...d, hour,
+        ai_lh_occ_class:  lhOccClass,
+        ai_cr1_occ_class: cr1OccClass,
+        ai_cr2_occ_class: cr2OccClass,
+        ai_lh_energy:     predictEnergyMode(lhOccClass, hour),
+        ai_cr1_energy:    predictEnergyMode(cr1OccClass, hour),
+        ai_cr1_lighting:  predictLighting(d.cr1_motion, d.cr1_lux, d.sched, 'AUTO'),
+        ai_cr2_lighting:  predictLighting(false, d.cr2_lux, d.sched, 'AUTO'),
+        ai_lh_temp_pred:  d.lh_temp + (lhOccClass > 0 ? 0.3 : -0.2), // simple prediction offset
+    };
+});
 
-// Heatmap: avg occupancy % by room × hour (0–23), computed from 235,881 rows
-const HEATMAP_DATA = {
-    Classroom_1:       [1.3,1.4,1.3,1.4,1.4,1.3,1.3,1.3,60.3,7.2,63.1,36.4,7.3,63.2,36.5,30.9,68.5,7.2,1.6,1.8,1.8,1.8,1.8,1.9],
-    Classroom_2:       [1.3,1.4,1.4,1.3,1.4,1.4,1.4,1.4,7.4,63.1,36.4,63.1,36.5,7.3,63.0,36.4,63.2,36.5,1.8,1.8,1.8,1.9,1.7,1.7],
-    Computer_Lab:      [1.4,1.3,1.2,1.4,1.3,1.3,1.3,1.4,7.2,63.0,68.3,7.4,60.4,7.1,63.0,71.1,68.4,7.3,1.8,1.8,1.8,1.8,1.9,1.8],
-    Electrical_Room:   [3.0,3.0,3.0,2.9,3.0,2.9,2.9,3.0,4.1,4.1,3.9,4.0,4.1,4.1,4.0,3.9,3.9,4.0,3.0,2.9,3.0,2.9,3.0,3.0],
-    Faculty_Office:    [1.4,1.3,1.2,1.4,1.3,1.5,1.5,1.4,7.4,63.1,71.1,68.4,7.2,63.1,71.1,71.0,68.5,7.3,1.7,1.7,1.8,1.8,1.8,1.8],
-    Large_Lecture_Hall:[1.4,1.3,1.4,1.3,1.3,1.3,1.4,1.3,7.2,63.2,36.6,63.1,36.6,7.1,63.0,68.4,31.3,68.4,1.8,1.9,1.9,1.8,1.8,1.8],
-    Lobby_Reception:   [1.4,1.3,1.4,1.4,1.4,1.3,1.4,10.5,51.1,16.7,9.0,8.9,34.3,38.3,9.0,8.9,9.1,9.2,1.7,1.8,1.8,1.8,1.7,1.8],
-    Lounge_Study:      [1.4,1.4,1.3,1.4,1.3,1.5,1.4,1.3,34.5,41.0,46.1,49.8,51.7,51.8,49.8,46.4,41.3,35.0,1.7,1.7,1.8,1.7,1.8,1.8],
-    Mechanical_Room:   [1.2,1.4,1.4,1.3,1.4,1.3,1.3,1.3,34.4,41.0,45.9,49.7,51.7,51.9,49.9,46.5,41.5,35.2,1.8,1.8,1.9,1.8,1.8,1.8],
-};
+const OCC_LABELS = { 0:'Unoccupied', 1:'Scheduled', 2:'Unscheduled' };
+const OCC_COLORS = { 0:'#64748b', 1:'#2563eb', 2:'#ef4444' };
+const ENERGY_COLORS = { active:'#10b981', standby:'#f59e0b', off:'#64748b' };
 
-const ALL_ROOMS = Object.keys(HEATMAP_DATA);
-
-const KPI_SUMMARY = [
-    {label:'Total Rooms',      value:'9',      unit:''},
-    {label:'Avg Temperature',  value:'23.3',   unit:'°C'},
-    {label:'Peak CO₂ Logged', value:'2,334',  unit:'ppm'},
-    {label:'Avg Daily Energy', value:'2,627',  unit:'Wh'},
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// D3 CHART COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Shared card wrapper
+// ── Shared card ───────────────────────────────────────────────────────────────
 function Card({ children, className = '' }) {
     return (
         <div className={`bg-white rounded-xl border border-slate-200/80 ${className}`}
@@ -183,326 +132,476 @@ function CardHead({ title, sub, iconName, right }) {
     );
 }
 
-// ── Temperature Line Chart ────────────────────────────────────────────────────
-function TemperatureChart({ data, room }) {
-    const svgRef    = useRef();
-    const wrapRef   = useRef();
-    const ttRef     = useRef();
-    const [width, setWidth] = useState(600);
+// ── D3 Temperature + AI Prediction chart ─────────────────────────────────────
+function TemperatureChart({ room }) {
+    const ref     = useRef();
+    const wrapRef = useRef();
+    const [w, setW] = useState(600);
 
-    // Responsive width
     useEffect(() => {
-        const obs = new ResizeObserver(entries => {
-            setWidth(entries[0].contentRect.width);
-        });
+        const obs = new ResizeObserver(e => setW(e[0].contentRect.width));
         if (wrapRef.current) obs.observe(wrapRef.current);
         return () => obs.disconnect();
     }, []);
 
-    useEffect(() => {
-        if (!data?.length) return;
-        const filtered = room
-            ? data.filter(d => d.room === room).sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp))
-            : data.sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
-        if (!filtered.length) return;
+    const data = ENRICHED.filter(d => {
+        if (room === 'Classroom_1')        return d.cr1_temp != null;
+        if (room === 'Classroom_2')        return d.cr2_temp != null;
+        if (room === 'Large_Lecture_Hall') return d.lh_temp  != null;
+        return true;
+    });
 
-        const svg    = d3.select(svgRef.current);
+    const getTempKey   = r => r === 'Classroom_1' ? 'cr1_temp' : r === 'Classroom_2' ? 'cr2_temp' : 'lh_temp';
+    const getPredKey   = r => r === 'Large_Lecture_Hall' ? 'ai_lh_temp_pred' : null;
+    const getOccKey    = r => r === 'Classroom_1' ? 'ai_cr1_occ_class' : r === 'Classroom_2' ? 'ai_cr2_occ_class' : 'ai_lh_occ_class';
+    const tempKey      = getTempKey(room);
+    const predKey      = getPredKey(room);
+    const occKey       = getOccKey(room);
+
+    useEffect(() => {
+        if (!data.length) return;
+        const svg = d3.select(ref.current);
         svg.selectAll('*').remove();
 
-        const height = 240;
-        const margin = { top:16, right:16, bottom:48, left:44 };
-        const iw = width - margin.left - margin.right;
-        const ih = height - margin.top - margin.bottom;
+        const h = 240, margin = { t:12, r:16, b:44, l:44 };
+        const iw = w - margin.l - margin.r;
+        const ih = h - margin.t - margin.b;
+        const g  = svg.attr('width', w).attr('height', h)
+            .append('g').attr('transform', `translate(${margin.l},${margin.t})`);
 
-        const g = svg.attr('width', width).attr('height', height)
-            .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
-
-        const xScale = d3.scaleTime()
-            .domain(d3.extent(filtered, d => new Date(d.timestamp))).range([0, iw]);
-        const yScale = d3.scaleLinear().domain([20, 28]).range([ih, 0]);
+        const xScale = d3.scalePoint().domain(data.map(d => d.t)).range([0, iw]);
+        const temps  = data.map(d => d[tempKey]).filter(Boolean);
+        const yScale = d3.scaleLinear().domain([20, Math.max(28, ...temps) + 0.5]).range([ih, 0]);
 
         // Grid
-        g.append('g').attr('opacity', 0.06)
+        g.append('g').attr('opacity', 0.07)
             .call(d3.axisLeft(yScale).tickSize(-iw).tickFormat(''));
 
-        // Comfort band
-        g.append('rect')
-            .attr('x', 0).attr('y', yScale(25))
+        // Comfort zone band (22–25°C)
+        g.append('rect').attr('x', 0).attr('y', yScale(25))
             .attr('width', iw).attr('height', yScale(22) - yScale(25))
-            .attr('fill', '#2563eb').attr('opacity', 0.05);
+            .attr('fill', '#2563eb').attr('opacity', 0.06);
 
         // Threshold lines
         [{val:25,color:'#ef4444',label:'25°C max'},{val:22,color:'#2563eb',label:'22°C min'}].forEach(t => {
-            g.append('line')
-                .attr('x1',0).attr('x2',iw)
+            g.append('line').attr('x1',0).attr('x2',iw)
                 .attr('y1',yScale(t.val)).attr('y2',yScale(t.val))
-                .attr('stroke',t.color).attr('stroke-width',1)
-                .attr('stroke-dasharray','4,3').attr('opacity',0.5);
-            g.append('text')
-                .attr('x',iw-4).attr('y',yScale(t.val)-4)
-                .attr('text-anchor','end').attr('font-size',9).attr('fill',t.color)
-                .attr('opacity',0.7).text(t.label);
+                .attr('stroke',t.color).attr('stroke-width',1).attr('stroke-dasharray','4,3').attr('opacity',0.5);
+            g.append('text').attr('x',iw-4).attr('y',yScale(t.val)-4)
+                .attr('text-anchor','end').attr('font-size',9).attr('fill',t.color).attr('opacity',0.7).text(t.label);
         });
 
         // Axes
+        const xTicks = data.filter((_,i) => i % 4 === 0).map(d => d.t);
         g.append('g').attr('transform',`translate(0,${ih})`)
-            .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.timeFormat('%H:%M')))
-            .call(ax => { ax.select('.domain').remove(); ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10); ax.selectAll('.tick line').attr('stroke','#e2e8f0'); });
+            .call(d3.axisBottom(xScale).tickValues(xTicks))
+            .call(ax => { ax.select('.domain').remove(); ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9).attr('transform','rotate(-30)').style('text-anchor','end'); ax.selectAll('.tick line').attr('stroke','#e2e8f0'); });
         g.append('g')
             .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => `${d}°`))
             .call(ax => { ax.select('.domain').remove(); ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10); ax.selectAll('.tick line').attr('stroke','#e2e8f0'); });
 
-        // Line segments colored by threshold
-        const line = d3.line()
-            .x(d => xScale(new Date(d.timestamp))).y(d => yScale(d.temperature_c))
-            .curve(d3.curveMonotoneX);
+        // Occupancy background colouring
+        data.forEach((d, i) => {
+            if (i === data.length - 1) return;
+            const x1 = xScale(d.t);
+            const x2 = xScale(data[i+1].t);
+            const cls = d[occKey] ?? 0;
+            if (cls > 0) {
+                g.append('rect').attr('x', x1).attr('y', 0)
+                    .attr('width', (x2 - x1)).attr('height', ih)
+                    .attr('fill', OCC_COLORS[cls]).attr('opacity', 0.07);
+            }
+        });
 
-        for (let i = 0; i < filtered.length - 1; i++) {
-            const avg = (filtered[i].temperature_c + filtered[i+1].temperature_c) / 2;
+        // Actual temperature line — colour by threshold
+        const lineBase = d3.line().x(d => xScale(d.t)).y(d => yScale(d[tempKey])).defined(d => d[tempKey] != null);
+        for (let i = 0; i < data.length - 1; i++) {
+            const avg = (data[i][tempKey] + data[i+1][tempKey]) / 2;
             const color = avg < 22 ? '#3b82f6' : avg > 25 ? '#ef4444' : '#10b981';
-            const sw    = avg > 25 ? 2.5 : 1.8;
-            g.append('path')
-                .datum([filtered[i], filtered[i+1]])
-                .attr('fill','none').attr('stroke',color).attr('stroke-width',sw)
-                .attr('stroke-linecap','round').attr('d',line);
+            g.append('path').datum([data[i], data[i+1]])
+                .attr('fill','none').attr('stroke',color).attr('stroke-width',2.2)
+                .attr('stroke-linecap','round')
+                .attr('d', d3.line().x(d => xScale(d.t)).y(d => yScale(d[tempKey])));
         }
 
-        // Dots
-        const tooltip = d3.select(ttRef.current);
-        g.selectAll('.dot').data(filtered).enter().append('circle')
-            .attr('cx', d => xScale(new Date(d.timestamp)))
-            .attr('cy', d => yScale(d.temperature_c))
-            .attr('r', 3)
-            .attr('fill', d => d.temperature_c < 22 ? '#3b82f6' : d.temperature_c > 25 ? '#ef4444' : '#10b981')
-            .attr('stroke','white').attr('stroke-width',1).attr('opacity',0.8)
-            .style('cursor','pointer')
-            .on('mouseover', (event, d) => {
-                const status = d.temperature_c < 22 ? 'Too Cold' : d.temperature_c > 25 ? 'Too Hot' : 'Optimal';
-                const color  = d.temperature_c < 22 ? '#3b82f6' : d.temperature_c > 25 ? '#ef4444' : '#10b981';
-                tooltip.style('opacity',1).style('left',(event.offsetX+12)+'px').style('top',(event.offsetY-40)+'px')
-                    .html(`<div class="font-bold text-slate-800 text-xs mb-1">${d.room.replace(/_/g,' ')}</div>
-            <div class="text-[11px] text-slate-500">${new Date(d.timestamp).toLocaleTimeString('en-AE',{hour:'2-digit',minute:'2-digit'})}</div>
-            <div class="text-[11px] mt-1"><span class="font-bold" style="color:${color}">${d.temperature_c.toFixed(1)}°C</span> — ${status}</div>
-            <div class="text-[11px] text-slate-400">CO₂: ${d.co2_ppm.toFixed(0)} ppm · Occ: ${d.occupancy_pct.toFixed(0)}%</div>`);
-            })
-            .on('mouseout', () => tooltip.style('opacity',0));
+        // AI predicted temperature line (dashed, for Lecture Hall)
+        if (predKey) {
+            g.append('path').datum(data.filter(d => d[predKey] != null))
+                .attr('fill','none').attr('stroke','#8b5cf6').attr('stroke-width',1.5)
+                .attr('stroke-dasharray','5,3')
+                .attr('d', d3.line().x(d => xScale(d.t)).y(d => yScale(d[predKey])));
+        }
 
-    }, [data, room, width]);
+        // Dots coloured by threshold
+        g.selectAll('.dot').data(data.filter(d => d[tempKey] != null))
+            .enter().append('circle')
+            .attr('cx', d => xScale(d.t)).attr('cy', d => yScale(d[tempKey]))
+            .attr('r', 2.5)
+            .attr('fill', d => d[tempKey] < 22 ? '#3b82f6' : d[tempKey] > 25 ? '#ef4444' : '#10b981')
+            .attr('stroke','white').attr('stroke-width',1);
+
+    }, [data, room, w]);
 
     return (
         <div ref={wrapRef} className="relative w-full">
-            <svg ref={svgRef} className="w-full" />
-            <div ref={ttRef}
-                 className="absolute pointer-events-none bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-lg text-slate-700 opacity-0 transition-opacity z-10"
-                 style={{ minWidth:'180px' }} />
+            <svg ref={ref} className="w-full" />
         </div>
     );
 }
 
-// ── Energy Bar Chart ──────────────────────────────────────────────────────────
-function EnergyBarChart({ data }) {
-    const svgRef  = useRef();
+// ── D3 Occupancy chart with AI classification bands ──────────────────────────
+function OccupancyChart({ room }) {
+    const ref     = useRef();
     const wrapRef = useRef();
-    const ttRef   = useRef();
-    const [width, setWidth] = useState(600);
+    const [w, setW] = useState(600);
 
     useEffect(() => {
-        const obs = new ResizeObserver(e => setWidth(e[0].contentRect.width));
+        const obs = new ResizeObserver(e => setW(e[0].contentRect.width));
         if (wrapRef.current) obs.observe(wrapRef.current);
         return () => obs.disconnect();
     }, []);
 
+    // For Lecture Hall we have actual occupancy count
+    // For classrooms we show PIR motion state + AI classification
+    const isLH = room === 'Large_Lecture_Hall';
+    const data  = ENRICHED;
+    const occKey    = room === 'Classroom_1' ? 'ai_cr1_occ_class' : room === 'Classroom_2' ? 'ai_cr2_occ_class' : 'ai_lh_occ_class';
+    const rawOccKey = isLH ? 'lh_occ' : null;
+
     useEffect(() => {
-        if (!data?.length) return;
-        const svg = d3.select(svgRef.current);
+        const svg = d3.select(ref.current);
         svg.selectAll('*').remove();
+        const h = 220, margin = { t:12, r:16, b:44, l:44 };
+        const iw = w - margin.l - margin.r;
+        const ih = h - margin.t - margin.b;
+        const g  = svg.attr('width',w).attr('height',h)
+            .append('g').attr('transform',`translate(${margin.l},${margin.t})`);
 
-        const height = 240;
-        const margin = { top:12, right:12, bottom:60, left:56 };
-        const iw = width - margin.left - margin.right;
-        const ih = height - margin.top - margin.bottom;
+        const xScale = d3.scalePoint().domain(data.map(d => d.t)).range([0, iw]);
 
-        const g = svg.attr('width',width).attr('height',height)
-            .append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+        if (isLH) {
+            // Bar chart for actual occupancy + AI prediction class colouring
+            const yScale = d3.scaleLinear().domain([0, 100]).range([ih, 0]);
+            g.append('g').attr('transform',`translate(0,${ih})`)
+                .call(d3.axisBottom(xScale).tickValues(data.filter((_,i)=>i%4===0).map(d=>d.t)))
+                .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9).attr('transform','rotate(-30)').style('text-anchor','end');ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
+            g.append('g').call(d3.axisLeft(yScale).ticks(5).tickFormat(d=>`${d}%`))
+                .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10);ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
 
-        const COLORS = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899','#64748b'];
+            // Grid
+            g.append('g').attr('opacity',0.07).call(d3.axisLeft(yScale).tickSize(-iw).tickFormat(''));
 
-        const xScale = d3.scaleBand()
-            .domain(data.map(d => d.room.replace(/_/g,' ').replace('Large Lecture Hall','Lect. Hall')))
-            .range([0,iw]).padding(0.25);
-        const yScale = d3.scaleLinear()
-            .domain([0, d3.max(data, d => d.energy_wh) * 1.1]).range([ih,0]);
+            // 85% capacity warning line
+            g.append('line').attr('x1',0).attr('x2',iw).attr('y1',yScale(85)).attr('y2',yScale(85))
+                .attr('stroke','#ef4444').attr('stroke-width',1).attr('stroke-dasharray','4,3').attr('opacity',0.5);
+            g.append('text').attr('x',iw-4).attr('y',yScale(85)-4).attr('text-anchor','end')
+                .attr('font-size',9).attr('fill','#ef4444').attr('opacity',0.7).text('85% warning');
+
+            const bw = Math.max(2, iw / data.length - 2);
+            data.forEach(d => {
+                const cls   = d[occKey];
+                const color = OCC_COLORS[cls];
+                g.append('rect')
+                    .attr('x', xScale(d.t) - bw/2)
+                    .attr('y', yScale(d.lh_occ ?? 0))
+                    .attr('width', bw)
+                    .attr('height', ih - yScale(d.lh_occ ?? 0))
+                    .attr('fill', color).attr('opacity', 0.8).attr('rx', 2);
+            });
+        } else {
+            // Motion timeline for classrooms
+            const yScale = d3.scaleLinear().domain([-0.2, 1.2]).range([ih, 0]);
+            g.append('g').attr('transform',`translate(0,${ih})`)
+                .call(d3.axisBottom(xScale).tickValues(data.filter((_,i)=>i%4===0).map(d=>d.t)))
+                .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9).attr('transform','rotate(-30)').style('text-anchor','end');ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
+
+            const motionKey = room === 'Classroom_1' ? 'cr1_motion' : null;
+
+            // AI classification background
+            data.forEach((d, i) => {
+                if (i === data.length - 1) return;
+                const x1 = xScale(d.t), x2 = xScale(data[i+1].t);
+                const cls = d[occKey] ?? 0;
+                g.append('rect').attr('x',x1).attr('y',0).attr('width',x2-x1).attr('height',ih)
+                    .attr('fill',OCC_COLORS[cls]).attr('opacity',0.12);
+            });
+
+            // Motion state line (Classroom 1 only)
+            if (motionKey) {
+                data.forEach((d, i) => {
+                    if (i === data.length - 1) return;
+                    const x1 = xScale(d.t), x2 = xScale(data[i+1].t);
+                    const y  = yScale(d[motionKey] ? 1 : 0);
+                    g.append('line').attr('x1',x1).attr('x2',x2).attr('y1',y).attr('y2',y)
+                        .attr('stroke','#2563eb').attr('stroke-width',2.5).attr('stroke-linecap','round');
+                    // Vertical connectors
+                    if (d[motionKey] !== data[i+1][motionKey]) {
+                        g.append('line').attr('x1',x2).attr('x2',x2)
+                            .attr('y1',yScale(d[motionKey]?1:0)).attr('y2',yScale(data[i+1][motionKey]?1:0))
+                            .attr('stroke','#2563eb').attr('stroke-width',2.5);
+                    }
+                });
+                g.append('text').attr('x',4).attr('y',yScale(1)-4).attr('font-size',9).attr('fill','#2563eb').text('Motion ON');
+                g.append('text').attr('x',4).attr('y',yScale(0)+12).attr('font-size',9).attr('fill','#94a3b8').text('Motion OFF');
+            }
+        }
+
+    }, [data, room, w]);
+
+    return (
+        <div ref={wrapRef} className="w-full">
+            <svg ref={ref} className="w-full" />
+        </div>
+    );
+}
+
+// ── Energy mode timeline ──────────────────────────────────────────────────────
+function EnergyChart({ room }) {
+    const ref     = useRef();
+    const wrapRef = useRef();
+    const [w, setW] = useState(600);
+
+    useEffect(() => {
+        const obs = new ResizeObserver(e => setW(e[0].contentRect.width));
+        if (wrapRef.current) obs.observe(wrapRef.current);
+        return () => obs.disconnect();
+    }, []);
+
+    const energyKey = room === 'Classroom_1' ? 'ai_cr1_energy' : room === 'Large_Lecture_Hall' ? 'ai_lh_energy' : 'ai_lh_energy';
+    const powerKey  = room === 'Classroom_1' ? 'cr1_temp' : 'lh_temp'; // placeholder — swap for real power when live
+
+    useEffect(() => {
+        const svg = d3.select(ref.current);
+        svg.selectAll('*').remove();
+        const h = 200, margin = { t:12, r:100, b:44, l:44 };
+        const iw = w - margin.l - margin.r;
+        const ih = h - margin.t - margin.b;
+        const g  = svg.attr('width',w).attr('height',h)
+            .append('g').attr('transform',`translate(${margin.l},${margin.t})`);
+
+        const data   = ENRICHED;
+        const xScale = d3.scalePoint().domain(data.map(d => d.t)).range([0, iw]);
+        const modes  = ['active','standby','off'];
+        const yScale = d3.scaleBand().domain(modes).range([0, ih]).padding(0.2);
+
+        g.append('g').attr('transform',`translate(0,${ih})`)
+            .call(d3.axisBottom(xScale).tickValues(data.filter((_,i)=>i%4===0).map(d=>d.t)))
+            .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9).attr('transform','rotate(-30)').style('text-anchor','end');ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
+        g.append('g').call(d3.axisLeft(yScale))
+            .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#64748b').attr('font-size',10).attr('font-weight',600);ax.selectAll('.tick line').remove();});
+
+        // AI energy mode segments
+        data.forEach((d, i) => {
+            if (i === data.length - 1) return;
+            const x1 = xScale(d.t), x2 = xScale(data[i+1].t);
+            const mode = d[energyKey];
+            g.append('rect')
+                .attr('x',x1).attr('y',yScale(mode))
+                .attr('width',x2-x1).attr('height',yScale.bandwidth())
+                .attr('fill',ENERGY_COLORS[mode]).attr('opacity',0.85).attr('rx',2);
+        });
+
+        // Legend on right
+        modes.forEach((m,i) => {
+            g.append('rect').attr('x',iw+10).attr('y',yScale(m)+yScale.bandwidth()/2-6).attr('width',12).attr('height',12).attr('fill',ENERGY_COLORS[m]).attr('rx',2);
+            g.append('text').attr('x',iw+26).attr('y',yScale(m)+yScale.bandwidth()/2+4).attr('font-size',10).attr('fill','#64748b').attr('text-transform','capitalize').text(m.charAt(0).toUpperCase()+m.slice(1));
+        });
+
+    }, [room, w]);
+
+    return (
+        <div ref={wrapRef} className="w-full">
+            <svg ref={ref} className="w-full" />
+        </div>
+    );
+}
+
+// ── Lighting state chart ──────────────────────────────────────────────────────
+function LightingChart({ room }) {
+    const ref     = useRef();
+    const wrapRef = useRef();
+    const [w, setW] = useState(600);
+
+    useEffect(() => {
+        const obs = new ResizeObserver(e => setW(e[0].contentRect.width));
+        if (wrapRef.current) obs.observe(wrapRef.current);
+        return () => obs.disconnect();
+    }, []);
+
+    const litKey = room === 'Classroom_1' ? 'ai_cr1_lighting' : 'ai_cr2_lighting';
+    const luxKey = room === 'Classroom_1' ? 'cr1_lux' : 'cr2_lux';
+
+    useEffect(() => {
+        const svg = d3.select(ref.current);
+        svg.selectAll('*').remove();
+        const h = 200, margin = { t:12, r:16, b:44, l:54 };
+        const iw = w - margin.l - margin.r;
+        const ih = h - margin.t - margin.b;
+        const g  = svg.attr('width',w).attr('height',h)
+            .append('g').attr('transform',`translate(${margin.l},${margin.t})`);
+
+        const xScale = d3.scalePoint().domain(ENRICHED.map(d=>d.t)).range([0,iw]);
+        const yScale = d3.scaleLinear().domain([0,600]).range([ih,0]);
+
+        g.append('g').attr('transform',`translate(0,${ih})`)
+            .call(d3.axisBottom(xScale).tickValues(ENRICHED.filter((_,i)=>i%4===0).map(d=>d.t)))
+            .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9).attr('transform','rotate(-30)').style('text-anchor','end');ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
+        g.append('g').call(d3.axisLeft(yScale).ticks(5).tickFormat(d=>`${d} lx`))
+            .call(ax=>{ax.select('.domain').remove();ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10);ax.selectAll('.tick line').attr('stroke','#e2e8f0');});
 
         // Grid
-        g.append('g').attr('opacity',0.06)
-            .call(d3.axisLeft(yScale).tickSize(-iw).tickFormat(''));
+        g.append('g').attr('opacity',0.07).call(d3.axisLeft(yScale).tickSize(-iw).tickFormat(''));
 
-        // Axes
-        g.append('g').attr('transform',`translate(0,${ih})`)
-            .call(d3.axisBottom(xScale))
-            .call(ax => {
-                ax.select('.domain').remove();
-                ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10)
-                    .attr('transform','rotate(-35)').style('text-anchor','end');
-                ax.selectAll('.tick line').remove();
-            });
-        g.append('g')
-            .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => d>=1000?`${(d/1000).toFixed(1)}k`:d))
-            .call(ax => {
-                ax.select('.domain').remove();
-                ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',10);
-                ax.selectAll('.tick line').attr('stroke','#e2e8f0');
-            });
+        // Lux area
+        const luxGrad = g.append('defs').append('linearGradient').attr('id','lux-grad').attr('x1','0').attr('x2','0').attr('y1','0').attr('y2','1');
+        luxGrad.append('stop').attr('offset','0%').attr('stop-color','#fbbf24').attr('stop-opacity',0.3);
+        luxGrad.append('stop').attr('offset','100%').attr('stop-color','#fbbf24').attr('stop-opacity',0.02);
 
-        // Y axis label
-        g.append('text').attr('transform','rotate(-90)').attr('x',-ih/2).attr('y',-44)
-            .attr('text-anchor','middle').attr('fill','#94a3b8').attr('font-size',10).text('Avg Daily Energy (Wh)');
+        g.append('path').datum(ENRICHED)
+            .attr('fill','url(#lux-grad)')
+            .attr('d', d3.area().x(d=>xScale(d.t)).y0(ih).y1(d=>yScale(Math.min(d[luxKey],550))).curve(d3.curveMonotoneX));
 
-        // Bars with enter animation
-        const tooltip = d3.select(ttRef.current);
-        g.selectAll('.bar').data(data).enter().append('rect')
-            .attr('class','bar')
-            .attr('x', d => xScale(d.room.replace(/_/g,' ').replace('Large Lecture Hall','Lect. Hall')))
-            .attr('width', xScale.bandwidth()).attr('rx', 3)
-            .attr('fill', (d,i) => COLORS[i % COLORS.length])
-            .attr('y', ih).attr('height', 0)
-            .style('cursor','pointer')
-            .on('mouseover', function(event, d) {
-                d3.select(this).attr('opacity',0.75);
-                tooltip.style('opacity',1).style('left',(event.offsetX+10)+'px').style('top',(event.offsetY-50)+'px')
-                    .html(`<div class="font-bold text-slate-800 text-xs mb-1">${d.room.replace(/_/g,' ')}</div>
-            <div class="text-[11px] text-slate-500">Daily avg: <span class="font-bold text-slate-800">${d.energy_wh.toLocaleString()} Wh</span></div>
-            <div class="text-[11px] text-slate-400">Monthly est: ${(d.energy_wh*30/1000).toFixed(1)} kWh</div>`);
-            })
-            .on('mouseout', function() { d3.select(this).attr('opacity',1); tooltip.style('opacity',0); })
-            .transition().duration(600).ease(d3.easeCubicOut)
-            .attr('y', d => yScale(d.energy_wh))
-            .attr('height', d => ih - yScale(d.energy_wh));
+        // Lux line
+        g.append('path').datum(ENRICHED)
+            .attr('fill','none').attr('stroke','#fbbf24').attr('stroke-width',1.8)
+            .attr('d', d3.line().x(d=>xScale(d.t)).y(d=>yScale(Math.min(d[luxKey],550))).curve(d3.curveMonotoneX));
 
-    }, [data, width]);
+        // AI lighting prediction background
+        ENRICHED.forEach((d,i) => {
+            if (i === ENRICHED.length-1) return;
+            const x1=xScale(d.t), x2=xScale(ENRICHED[i+1].t);
+            if (d[litKey]) {
+                g.append('rect').attr('x',x1).attr('y',0).attr('width',x2-x1).attr('height',ih)
+                    .attr('fill','#fef9c3').attr('opacity',0.25);
+            }
+        });
+
+        // 300 lux threshold (dim lights)
+        g.append('line').attr('x1',0).attr('x2',iw).attr('y1',yScale(300)).attr('y2',yScale(300))
+            .attr('stroke','#f59e0b').attr('stroke-width',1).attr('stroke-dasharray','4,3').attr('opacity',0.6);
+        g.append('text').attr('x',4).attr('y',yScale(300)-4).attr('font-size',9).attr('fill','#f59e0b').text('300 lx — dim threshold');
+
+        // 600 lux threshold (lights off)
+        g.append('line').attr('x1',0).attr('x2',iw).attr('y1',yScale(580)).attr('y2',yScale(580))
+            .attr('stroke','#10b981').attr('stroke-width',1).attr('stroke-dasharray','4,3').attr('opacity',0.6);
+        g.append('text').attr('x',4).attr('y',yScale(580)-4).attr('font-size',9).attr('fill','#10b981').text('600 lx — lights off');
+
+    }, [room, w]);
 
     return (
-        <div ref={wrapRef} className="relative w-full">
-            <svg ref={svgRef} className="w-full" />
-            <div ref={ttRef}
-                 className="absolute pointer-events-none bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-lg text-slate-700 opacity-0 transition-opacity z-10"
-                 style={{ minWidth:'180px' }} />
+        <div ref={wrapRef} className="w-full">
+            <svg ref={ref} className="w-full" />
         </div>
     );
 }
 
-// ── Occupancy Heatmap ─────────────────────────────────────────────────────────
-function OccupancyHeatmap({ data }) {
-    const svgRef  = useRef();
-    const wrapRef = useRef();
-    const ttRef   = useRef();
-    const [width, setWidth] = useState(700);
-
-    useEffect(() => {
-        const obs = new ResizeObserver(e => setWidth(e[0].contentRect.width));
-        if (wrapRef.current) obs.observe(wrapRef.current);
-        return () => obs.disconnect();
-    }, []);
-
-    useEffect(() => {
-        if (!data || !Object.keys(data).length) return;
-        const svg = d3.select(svgRef.current);
-        svg.selectAll('*').remove();
-
-        const rooms = Object.keys(data);
-        const hours = Array.from({length:24},(_,i)=>i);
-
-        const margin = { top:28, right:12, bottom:16, left:128 };
-        const iw = width - margin.left - margin.right;
-        const cellH = 26;
-        const ih = cellH * rooms.length;
-        const height = ih + margin.top + margin.bottom;
-
-        const g = svg.attr('width',width).attr('height',height)
-            .append('g').attr('transform',`translate(${margin.left},${margin.top})`);
-
-        const xScale = d3.scaleBand().domain(hours).range([0,iw]).padding(0.06);
-        const yScale = d3.scaleBand().domain(rooms).range([0,ih]).padding(0.08);
-
-        const colorScale = d3.scaleSequential()
-            .domain([0,100])
-            .interpolator(d3.interpolateRgb('#f0f9ff','#1d4ed8'));
-
-        // X axis hours
-        g.append('g')
-            .call(d3.axisTop(xScale).tickValues(hours.filter(h => h%3===0)).tickFormat(d => `${String(d).padStart(2,'0')}:00`))
-            .call(ax => { ax.select('.domain').remove(); ax.selectAll('text').attr('fill','#94a3b8').attr('font-size',9); ax.selectAll('.tick line').remove(); });
-
-        // Y axis rooms
-        g.append('g')
-            .call(d3.axisLeft(yScale).tickFormat(d => d.replace(/_/g,' ').replace('Large Lecture Hall','Lect. Hall')))
-            .call(ax => { ax.select('.domain').remove(); ax.selectAll('text').attr('fill','#64748b').attr('font-size',10); ax.selectAll('.tick line').remove(); });
-
-        const tooltip = d3.select(ttRef.current);
-
-        rooms.forEach(room => {
-            hours.forEach(hour => {
-                const val = data[room][hour] ?? 0;
-                g.append('rect')
-                    .attr('x', xScale(hour)).attr('y', yScale(room))
-                    .attr('width', xScale.bandwidth()).attr('height', yScale.bandwidth())
-                    .attr('fill', colorScale(val)).attr('rx', 2)
-                    .style('cursor','pointer')
-                    .on('mouseover', function(event) {
-                        d3.select(this).attr('stroke','#2563eb').attr('stroke-width',1.5);
-                        tooltip.style('opacity',1).style('left',(event.offsetX+10)+'px').style('top',(event.offsetY-50)+'px')
-                            .html(`<div class="font-bold text-slate-800 text-xs mb-1">${room.replace(/_/g,' ')}</div>
-                <div class="text-[11px] text-slate-500">${String(hour).padStart(2,'0')}:00 – ${String(hour+1).padStart(2,'0')}:00</div>
-                <div class="text-[11px] mt-1">Avg occupancy: <span class="font-bold text-blue-600">${val.toFixed(1)}%</span></div>`);
-                    })
-                    .on('mouseout', function() { d3.select(this).attr('stroke','none'); tooltip.style('opacity',0); });
-            });
-        });
-
-        // Gradient legend
-        const defs = svg.append('defs');
-        const grad = defs.append('linearGradient').attr('id','occ-grad');
-        grad.selectAll('stop').data([
-            {offset:'0%',color:'#f0f9ff'},{offset:'50%',color:'#93c5fd'},{offset:'100%',color:'#1d4ed8'}
-        ]).enter().append('stop').attr('offset',d=>d.offset).attr('stop-color',d=>d.color);
-
-        const legX = iw - 160, legY = -24, legW = 160, legH = 10;
-        g.append('rect').attr('x',legX).attr('y',legY).attr('width',legW).attr('height',legH)
-            .attr('rx',3).style('fill','url(#occ-grad)');
-        ['0%','50%','100%'].forEach((lbl,i) => {
-            g.append('text').attr('x',legX+i*(legW/2)).attr('y',legY+legH+10)
-                .attr('text-anchor','middle').attr('fill','#94a3b8').attr('font-size',9).text(lbl);
-        });
-        g.append('text').attr('x',legX+legW/2).attr('y',legY-3)
-            .attr('text-anchor','middle').attr('fill','#94a3b8').attr('font-size',9).text('Avg Occupancy');
-
-    }, [data, width]);
+// ── AI confidence strip ───────────────────────────────────────────────────────
+function ConfidenceStrip({ data, room }) {
+    const occKey = room === 'Classroom_1' ? 'ai_cr1_occ_class' : room === 'Classroom_2' ? 'ai_cr2_occ_class' : 'ai_lh_occ_class';
+    const classes = data.map(d => d[occKey] ?? 0);
+    const scheduled   = classes.filter(c => c === 1).length;
+    const unscheduled = classes.filter(c => c === 2).length;
+    const unoccupied  = classes.filter(c => c === 0).length;
+    const total = classes.length || 1;
 
     return (
-        <div ref={wrapRef} className="relative w-full overflow-x-auto">
-            <svg ref={svgRef} className="w-full" />
-            <div ref={ttRef}
-                 className="absolute pointer-events-none bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-lg text-slate-700 opacity-0 transition-opacity z-10"
-                 style={{ minWidth:'180px' }} />
+        <div className="flex items-center gap-4 flex-wrap">
+            {[
+                { label:'Unoccupied', count:unoccupied, color:'#64748b' },
+                { label:'Scheduled',  count:scheduled,  color:'#2563eb' },
+                { label:'Unscheduled',count:unscheduled,color:'#ef4444' },
+            ].map(s => (
+                <div key={s.label} className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-sm" style={{ background:s.color }} />
+                    <span className="text-[11px] font-semibold text-slate-600">{s.label}</span>
+                    <span className="text-[11px] font-bold text-slate-400" style={{ fontFamily:"'DM Mono',monospace" }}>
+            {Math.round((s.count/total)*100)}%
+          </span>
+                </div>
+            ))}
+            <span className="ml-auto text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded border border-violet-100 uppercase tracking-widest">
+        AI Prediction
+      </span>
         </div>
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN PAGE
-// ─────────────────────────────────────────────────────────────────────────────
-const REPORT_TYPES = [
-    {iconName:'temperature', iconBg:'bg-blue-50',    iconColor:'text-blue-600',    title:'Energy Summary',     desc:'Avg Wh/day per room — all 9 zones',   exportType:'energy'     },
-    {iconName:'occupancy',   iconBg:'bg-emerald-50', iconColor:'text-emerald-600', title:'Occupancy Report',   desc:'Hourly patterns — Sept to Dec 2025',   exportType:'occupancy'  },
-    {iconName:'alerts',      iconBg:'bg-red-50',     iconColor:'text-red-600',     title:'Incident Log',       desc:'Anomaly flags from synthetic dataset',  exportType:'incidents'  },
-    {iconName:'co2',         iconBg:'bg-amber-50',   iconColor:'text-amber-600',   title:'Environmental Data', desc:'Temp, CO₂, humidity — all rooms',      exportType:'environment'},
+// ── CHART VIEW CONFIG ─────────────────────────────────────────────────────────
+const CHART_VIEWS = [
+    {
+        id: 'temperature',
+        label: 'Temperature',
+        icon: 'temperature',
+        desc: 'Actual vs AI-predicted temperature with occupancy colouring',
+        rooms: ['Classroom_1','Classroom_2','Large_Lecture_Hall'],
+        component: TemperatureChart,
+        legend: [
+            { color:'#3b82f6', label:'Too Cold (< 22°C)' },
+            { color:'#10b981', label:'Optimal (22–25°C)' },
+            { color:'#ef4444', label:'Too Hot (> 25°C)' },
+            { color:'#8b5cf6', label:'AI Prediction (dashed)', dashed:true },
+        ],
+    },
+    {
+        id: 'occupancy',
+        label: 'Occupancy',
+        icon: 'occupancy',
+        desc: 'AI occupancy classification — Unoccupied / Scheduled / Unscheduled',
+        rooms: ['Classroom_1','Classroom_2','Large_Lecture_Hall'],
+        component: OccupancyChart,
+        legend: [
+            { color:'#64748b', label:'Unoccupied' },
+            { color:'#2563eb', label:'Scheduled class' },
+            { color:'#ef4444', label:'Unscheduled (alert)' },
+        ],
+    },
+    {
+        id: 'energy',
+        label: 'Energy Mode',
+        icon: 'zap',
+        desc: 'AI-recommended energy state — Active / Standby / Off',
+        rooms: ['Classroom_1','Classroom_2','Large_Lecture_Hall'],
+        component: EnergyChart,
+        legend: [
+            { color:'#10b981', label:'Active' },
+            { color:'#f59e0b', label:'Standby' },
+            { color:'#64748b', label:'Off' },
+        ],
+    },
+    {
+        id: 'lighting',
+        label: 'Lighting',
+        icon: 'lighting',
+        desc: 'Ambient lux levels with AI-predicted lighting state',
+        rooms: ['Classroom_1','Classroom_2'],
+        component: LightingChart,
+        legend: [
+            { color:'#fbbf24', label:'Ambient lux (measured)' },
+            { color:'#fef9c3', label:'AI: lights ON prediction' },
+            { color:'#f59e0b', label:'300 lx — dim threshold', dashed:true },
+            { color:'#10b981', label:'600 lx — off threshold', dashed:true },
+        ],
+    },
 ];
 
-export default function Analytics() {
-    const [selectedRoom, setSelectedRoom] = useState('Large_Lecture_Hall');
+const MVP_ROOMS = [
+    { id:'Classroom_1',        label:'Classroom 1',       node:1, icon:'motion',      nodeDesc:'PIR + Lux + Temp' },
+    { id:'Classroom_2',        label:'Classroom 2',       node:2, icon:'lighting',    nodeDesc:'Ambient Lux + Temp' },
+    { id:'Large_Lecture_Hall', label:'Large Lecture Hall',node:3, icon:'temperature', nodeDesc:'Temp + CO₂ + Occupancy + HVAC' },
+];
 
-    const tempForRoom = RAW_TEMP_DATA.filter(d => d.room === selectedRoom)
-        .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function Analytics() {
+    const { sensorState, isLive } = useLiveSensorState();
+    const [activeView, setActiveView] = useState('temperature');
+    const [activeRoom, setActiveRoom] = useState('Large_Lecture_Hall');
+
+    const view       = CHART_VIEWS.find(v => v.id === activeView);
+    const ChartComp  = view?.component;
+    const validRooms = MVP_ROOMS.filter(r => view?.rooms.includes(r.id));
+
+    // Auto-switch room if current room not valid for this view
+    const safeRoom = view?.rooms.includes(activeRoom) ? activeRoom : view?.rooms[0];
 
     return (
         <div className="space-y-5">
@@ -510,125 +609,167 @@ export default function Analytics() {
             {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-lg font-bold text-slate-900">Analytics & Reports</h1>
+                    <h1 className="text-lg font-bold text-slate-900">Analytics & AI Predictions</h1>
                     <p className="text-sm text-slate-400 mt-0.5">
-                        Synthetic dataset · 235,881 rows · 9 rooms · Sept–Dec 2025 · 5-min intervals
+                        3 active nodes · Sept 15 2025 · Select a view and room below
+                        {isLive && <span className="ml-2 text-emerald-600 font-semibold">· Live Firebase data</span>}
                     </p>
                 </div>
-                <button
-                    onClick={() => exportFullReport({ rooms:[], alerts:[], kpis:KPI_SUMMARY, label:'full' })}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-colors shadow-md">
-                    <Icon name="download" className="w-3.5 h-3.5" /> Export Report
-                </button>
+                <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-bold text-violet-600 bg-violet-50 border border-violet-100 px-3 py-1.5 rounded-full">
+            <Icon name="activity" className="w-3.5 h-3.5" />
+            AI Predictions Active
+          </span>
+                    <button onClick={() => exportFullReport({ rooms:[], alerts:[], kpis:[], label:'analytics' })}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-colors shadow-md">
+                        <Icon name="download" className="w-3.5 h-3.5" /> Export
+                    </button>
+                </div>
             </div>
 
-            {/* KPI strip */}
-            <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-                {KPI_SUMMARY.map(k => (
-                    <Card key={k.label} className="p-5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{k.label}</p>
-                        <p className="text-3xl font-bold text-slate-900" style={{fontFamily:"'DM Mono',monospace"}}>
-                            {k.value}<span className="text-base font-normal text-slate-400 ml-1">{k.unit}</span>
-                        </p>
-                    </Card>
+            {/* ── VIEW SELECTOR (Step 3 — selectable chart views) ── */}
+            <Card className="p-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Select Data View</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {CHART_VIEWS.map(v => (
+                        <button key={v.id} onClick={() => setActiveView(v.id)}
+                                className={`flex flex-col items-start gap-2 p-3.5 rounded-xl border-2 transition-all text-left
+                      ${activeView === v.id
+                                    ? 'border-blue-500 bg-blue-50 shadow-sm'
+                                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center
+                ${activeView === v.id ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                                <Icon name={v.icon} className={`w-4 h-4 ${activeView === v.id ? 'text-white' : 'text-slate-500'}`} />
+                            </div>
+                            <div>
+                                <p className={`text-sm font-bold ${activeView === v.id ? 'text-blue-700' : 'text-slate-700'}`}>{v.label}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">{v.desc}</p>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            </Card>
+
+            {/* ── ROOM SELECTOR ── */}
+            <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Room / Node</span>
+                {validRooms.map(r => (
+                    <button key={r.id} onClick={() => setActiveRoom(r.id)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-bold transition-all
+                    ${safeRoom === r.id
+                                ? 'bg-slate-900 border-slate-900 text-white shadow-md'
+                                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'}`}>
+                        <Icon name={r.icon} className="w-3.5 h-3.5" />
+                        {r.label}
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide
+              ${safeRoom === r.id ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600'}`}>
+              N{r.node}
+            </span>
+                    </button>
                 ))}
             </div>
 
-            {/* Temperature Chart */}
-            <Card>
+            {/* ── MAIN CHART ── */}
+            <Card className="overflow-hidden">
                 <CardHead
-                    title="Temperature Trend — Sept 15 2025"
-                    sub="Threshold coloring: blue < 22°C optimal 22–25°C red > 25°C · hover dots for details"
-                    iconName="temperature"
+                    title={`${view?.label} — ${MVP_ROOMS.find(r=>r.id===safeRoom)?.label}`}
+                    sub={view?.desc}
+                    iconName={view?.icon}
                     right={
-                        <div className="flex items-center gap-2">
-                            <select
-                                value={selectedRoom}
-                                onChange={e => setSelectedRoom(e.target.value)}
-                                className="px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all">
-                                {ALL_ROOMS.map(r => (
-                                    <option key={r} value={r}>{r.replace(/_/g,' ')}</option>
-                                ))}
-                            </select>
+                        <div className="flex items-center gap-3 flex-wrap">
+                            {/* Legend */}
+                            {view?.legend.map(l => (
+                                <span key={l.label} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                  <span className={`w-5 h-1.5 rounded-full inline-block ${l.dashed ? 'opacity-70' : ''}`}
+                        style={{ background:l.color, backgroundImage: l.dashed ? `repeating-linear-gradient(90deg,${l.color} 0,${l.color} 4px,transparent 4px,transparent 7px)` : undefined }} />
+                                    {l.label}
+                </span>
+                            ))}
                         </div>
                     }
                 />
                 <div className="p-5">
-                    {/* Legend */}
-                    <div className="flex items-center gap-5 mb-4">
-                        {[['#3b82f6','Too Cold (< 22°C)'],['#10b981','Optimal (22–25°C)'],['#ef4444','Too Hot (> 25°C)']].map(([color,label]) => (
-                            <span key={label} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                <span className="w-5 h-1.5 rounded-full inline-block" style={{background:color}} /> {label}
-              </span>
-                        ))}
+                    {/* AI prediction summary */}
+                    <div className="mb-4">
+                        <ConfidenceStrip data={ENRICHED} room={safeRoom} />
                     </div>
-                    <TemperatureChart data={RAW_TEMP_DATA} room={selectedRoom} />
-                    {tempForRoom.length === 0 && (
-                        <p className="text-sm text-slate-400 text-center py-8">No readings for {selectedRoom.replace(/_/g,' ')} on this date.</p>
-                    )}
+                    {ChartComp && <ChartComp room={safeRoom} />}
                 </div>
             </Card>
 
-            {/* Energy Bar Chart */}
-            <Card>
-                <CardHead
-                    title="Average Daily Energy Consumption per Room"
-                    sub="Computed from 3-month synthetic dataset · cube-law fan modulation applied · hover bars for detail"
-                    iconName="zap"
-                    right={
-                        <button
-                            onClick={() => exportEnergyData(
-                                { labels: ENERGY_DATA.map(d=>d.room), actual: ENERGY_DATA.map(d=>d.energy_wh), forecast: ENERGY_DATA.map(d=>d.energy_wh) },
-                                'all-rooms'
-                            )}
-                            className="flex items-center gap-1.5 text-[11px] font-bold text-blue-600 border border-blue-100 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg uppercase tracking-widest transition-all">
-                            <Icon name="download" className="w-3 h-3" /> Export CSV
-                        </button>
-                    }
-                />
-                <div className="p-5">
-                    <EnergyBarChart data={ENERGY_DATA} />
-                </div>
-            </Card>
+            {/* ── AI PREDICTION SUMMARY CARDS ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {MVP_ROOMS.map(r => {
+                    const lastReading = ENRICHED[ENRICHED.length - 8]; // ~17:30
+                    const occKey    = r.id==='Classroom_1'?'ai_cr1_occ_class':r.id==='Classroom_2'?'ai_cr2_occ_class':'ai_lh_occ_class';
+                    const energyKey = r.id==='Classroom_1'?'ai_cr1_energy':r.id==='Large_Lecture_Hall'?'ai_lh_energy':'ai_lh_energy';
+                    const occClass  = lastReading[occKey] ?? 0;
+                    const energy    = lastReading[energyKey] ?? 'off';
+                    const sensor    = sensorState?.[r.id];
 
-            {/* Occupancy Heatmap */}
-            <Card>
-                <CardHead
-                    title="Occupancy Patterns — Room × Hour (Avg across Sept–Dec)"
-                    sub="Darker blue = higher occupancy · schedule patterns clearly visible · class sessions at 8am, 10am, 12pm, 2pm, 4pm"
-                    iconName="occupancy"
-                />
-                <div className="p-5">
-                    <OccupancyHeatmap data={HEATMAP_DATA} />
-                </div>
-            </Card>
+                    return (
+                        <Card key={r.id} className={`p-4 ${safeRoom===r.id ? 'ring-2 ring-blue-400' : ''}`}>
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center">
+                                    <Icon name={r.icon} className="w-3.5 h-3.5 text-slate-500" />
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-bold text-slate-700">{r.label}</p>
+                                    <p className="text-[10px] text-blue-500 font-bold">Node {r.node}</p>
+                                </div>
+                                <span className="ml-auto text-[9px] font-bold uppercase px-2 py-0.5 rounded-full text-white"
+                                      style={{ background: OCC_COLORS[occClass] }}>
+                  {OCC_LABELS[occClass]}
+                </span>
+                            </div>
+                            <div className="space-y-1.5 text-[12px]">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-500">AI Energy Mode</span>
+                                    <span className="font-bold" style={{ color:ENERGY_COLORS[energy] }}>{energy.charAt(0).toUpperCase()+energy.slice(1)}</span>
+                                </div>
+                                {sensor?.temperature_c && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Temperature</span>
+                                        <span className="font-bold text-slate-700" style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.temperature_c.toFixed(1)}°C</span>
+                                    </div>
+                                )}
+                                {sensor?.co2_ppm && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">CO₂</span>
+                                        <span className={`font-bold ${sensor.co2_ppm>1000?'text-red-600':sensor.co2_ppm>600?'text-amber-600':'text-emerald-600'}`}
+                                              style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.co2_ppm} ppm</span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between">
+                                    <span className="text-slate-500">Sensors</span>
+                                    <span className="text-slate-400 text-[10px]">{r.nodeDesc}</span>
+                                </div>
+                            </div>
+                        </Card>
+                    );
+                })}
+            </div>
 
-            {/* Downloadable reports */}
+            {/* ── EXPORT ── */}
             <Card>
-                <CardHead
-                    title="Downloadable Reports"
-                    iconName="download"
-                    right={
-                        <button
-                            onClick={() => exportFullReport({rooms:[],alerts:[],kpis:KPI_SUMMARY,label:'full'})}
-                            className="text-[11px] font-bold text-blue-600 hover:text-blue-700 uppercase tracking-widest transition-colors flex items-center gap-1">
-                            <Icon name="plus" className="w-3.5 h-3.5" /> Generate New
-                        </button>
-                    }
-                />
-                <div className="p-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                    {REPORT_TYPES.map(r => (
+                <CardHead title="Downloadable Reports" iconName="download" />
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {[
+                        { icon:'temperature', bg:'bg-blue-50',   color:'text-blue-600',   title:'Temperature Report',  desc:'Node 3 temp + AI predictions', type:'temperature' },
+                        { icon:'occupancy',   bg:'bg-violet-50', color:'text-violet-600', title:'Occupancy Report',    desc:'AI occupancy classification',   type:'occupancy'   },
+                        { icon:'zap',         bg:'bg-emerald-50',color:'text-emerald-600',title:'Energy Mode Report',  desc:'AI energy state timeline',       type:'energy'      },
+                    ].map(r => (
                         <div key={r.title}
-                             onClick={() => exportFullReport({rooms:[],alerts:[],kpis:KPI_SUMMARY,label:r.exportType})}
-                             className="flex items-center gap-3 p-4 rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-sm transition-all cursor-pointer group">
-                            <div className={`w-9 h-9 ${r.iconBg} rounded-xl flex items-center justify-center shrink-0`}>
-                                <Icon name={r.iconName} className={`w-4 h-4 ${r.iconColor}`} />
+                             onClick={() => exportFullReport({ rooms:[], alerts:[], kpis:[], label:r.type })}
+                             className="flex items-center gap-3 p-4 rounded-xl border border-slate-100 hover:border-blue-200 cursor-pointer group transition-all">
+                            <div className={`w-9 h-9 ${r.bg} rounded-xl flex items-center justify-center`}>
+                                <Icon name={r.icon} className={`w-4 h-4 ${r.color}`} />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors leading-tight">{r.title}</p>
-                                <p className="text-[10px] text-slate-400 mt-0.5 truncate">{r.desc}</p>
+                                <p className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{r.title}</p>
+                                <p className="text-[10px] text-slate-400">{r.desc}</p>
                             </div>
-                            <Icon name="download" className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors shrink-0" />
+                            <Icon name="download" className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
                         </div>
                     ))}
                 </div>

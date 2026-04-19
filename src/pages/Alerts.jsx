@@ -1,28 +1,98 @@
+/**
+ * Alerts.jsx — Phase 3 MVP
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Professor feedback implemented:
+ *   ✓ Clear legend explaining each alert type
+ *   ✓ Normal operating range shown for each sensor
+ *   ✓ Warning and critical thresholds explicitly defined
+ *   ✓ Recommended system response per alert
+ *   ✓ Scoped to 3 active nodes (CR1, CR2, Lecture Hall)
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
 import { useState, useMemo } from 'react';
 import { Icon } from '../components/panels/Icon';
 import { exportAlertLog } from '../services/exportService';
-import { MOCK_SENSOR_STATE, deriveAlerts, CAMPUS_TIME } from '../services/sensorState';
+import { useLiveSensorState, deriveAlerts } from '../services/sensorState';
 
-// ── MOCK DATA (replace with Firebase subscription in Phase 3) ────────────────
-// Active alerts are derived from the live sensor state — no separate mock needed.
-// Phase 3: pass Firebase sensorState into deriveAlerts() in real time.
-
-const INITIAL_DERIVED = deriveAlerts(MOCK_SENSOR_STATE, CAMPUS_TIME);
-
-// Static historical event log (will come from Firebase /alertLog in Phase 3)
+// Static historical event log for the 3 MVP nodes
 const EVENT_LOG = [
-    { id:1,  ts:'2026-03-23 10:12:45', level:'critical', event:'CO₂ Levels High',              source:'Large Lecture Hall (Node 3)', ack:'unacknowledged' },
-    { id:2,  ts:'2026-03-23 09:58:12', level:'warning',  event:'Temperature Fluctuation',       source:'Lecture Hall (Node 3)',        ack:'acknowledged'   },
-    { id:3,  ts:'2026-03-23 09:30:05', level:'info',     event:'Fan Speed Changed to 100%',     source:'Mechanical Room (Node 6)',     ack:'resolved'       },
-    { id:4,  ts:'2026-03-23 09:15:33', level:'info',     event:'Damper Fully Open (0°)',         source:'Lecture Hall AHU (Node 3)',    ack:'resolved'       },
-    { id:5,  ts:'2026-03-23 08:47:01', level:'warning',  event:'Near Full Capacity',             source:'Lecture Hall (Node 3)',        ack:'acknowledged'   },
-    { id:6,  ts:'2026-03-23 08:12:44', level:'critical', event:'Motion Detected After Hours',   source:'Classroom 1 (Node 1)',         ack:'resolved'       },
-    { id:7,  ts:'2026-03-23 07:55:22', level:'info',     event:'Campus Clock Reset to 07:00',   source:'Digital Twin (DT)',            ack:'resolved'       },
-    { id:8,  ts:'2026-03-22 18:03:09', level:'critical', event:'Unauthorized Lab Access',       source:'Computer Lab (Node 5)',        ack:'resolved'       },
-    { id:9,  ts:'2026-03-22 18:00:00', level:'info',     event:'PC Automatic Shutdown Triggered',source:'Computer Lab (Node 5)',       ack:'resolved'       },
-    { id:10, ts:'2026-03-22 17:45:33', level:'warning',  event:'LED Strips ON — No Class',      source:'Computer Lab (Node 5)',        ack:'acknowledged'   },
-    { id:11, ts:'2026-03-22 15:30:00', level:'info',     event:'Faculty Office: Faculty Left',  source:'Faculty Office (Node 4)',      ack:'resolved'       },
-    { id:12, ts:'2026-03-22 14:12:55', level:'warning',  event:'Classroom 2 Lights ON — No Class', source:'Classroom 2 (Node 2)',     ack:'resolved'       },
+    { id:1,  ts:'2026-04-15 10:12:45', level:'critical', event:'CO₂ Levels Exceed Safe Limit (1124 ppm)', source:'Large Lecture Hall (Node 3)', ack:'unacknowledged' },
+    { id:2,  ts:'2026-04-15 09:58:12', level:'critical', event:'Temperature Above Critical Threshold (25.8°C)', source:'Lecture Hall (Node 3)', ack:'acknowledged' },
+    { id:3,  ts:'2026-04-15 09:30:05', level:'info',     event:'HVAC Fan Speed Changed to 100%',              source:'Lecture Hall (Node 3)',    ack:'resolved'   },
+    { id:4,  ts:'2026-04-15 09:15:33', level:'info',     event:'Damper Fully Open (0°) — High Occupancy',     source:'Lecture Hall (Node 3)',    ack:'resolved'   },
+    { id:5,  ts:'2026-04-15 08:47:01', level:'warning',  event:'Occupancy Approaching Full Capacity (88%)',   source:'Lecture Hall (Node 3)',    ack:'acknowledged'},
+    { id:6,  ts:'2026-04-15 08:12:44', level:'warning',  event:'Motion Detected — No Class Scheduled',        source:'Classroom 1 (Node 1)',     ack:'resolved'   },
+    { id:7,  ts:'2026-04-15 07:55:22', level:'info',     event:'Campus Clock Reset to 07:00',                 source:'Digital Twin (DT)',        ack:'resolved'   },
+    { id:8,  ts:'2026-04-14 16:30:00', level:'warning',  event:'Classroom 2 Lights ON — No Class Scheduled',  source:'Classroom 2 (Node 2)',     ack:'resolved'   },
+    { id:9,  ts:'2026-04-14 15:45:00', level:'warning',  event:'Temperature Above Warning Threshold (25.1°C)',source:'Classroom 2 (Node 2)',     ack:'resolved'   },
+    { id:10, ts:'2026-04-14 14:20:00', level:'critical', event:'Unscheduled Occupancy Detected After Hours',  source:'Lecture Hall (Node 3)',    ack:'resolved'   },
+    { id:11, ts:'2026-04-14 10:05:00', level:'info',     event:'Motion Sensor Active — Class In Session',     source:'Classroom 1 (Node 1)',     ack:'resolved'   },
+    { id:12, ts:'2026-04-14 08:30:00', level:'info',     event:'HVAC Demand Control Activated (Occupancy>50%)', source:'Lecture Hall (Node 3)', ack:'resolved'   },
+];
+
+// ── THRESHOLD LEGEND (professor feedback: define what each alert means) ───────
+const THRESHOLDS = [
+    {
+        sensor:   'Temperature',
+        icon:     'temperature',
+        iconBg:   'bg-blue-50',
+        iconColor:'text-blue-600',
+        node:     'Node 3 (Lecture Hall), Node 1 & 2 (Classrooms)',
+        normal:   { range:'20 – 25°C', color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'> 25°C',    color:'text-amber-600',   bg:'bg-amber-50',   action:'Check HVAC setpoint, reduce solar gain' },
+        critical: { range:'> 27°C',    color:'text-red-600',     bg:'bg-red-50',     action:'Immediate HVAC override, alert occupants' },
+    },
+    {
+        sensor:   'CO₂ Concentration',
+        icon:     'co2',
+        iconBg:   'bg-teal-50',
+        iconColor:'text-teal-600',
+        node:     'Node 3 (Lecture Hall)',
+        normal:   { range:'< 600 ppm',        color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'600 – 1000 ppm',   color:'text-amber-600',   bg:'bg-amber-50',   action:'Increase ventilation — open damper to 30°, fan at 40%' },
+        critical: { range:'> 1000 ppm',       color:'text-red-600',     bg:'bg-red-50',     action:'Maximum ventilation — damper fully open, fan at 100%' },
+    },
+    {
+        sensor:   'Occupancy Level',
+        icon:     'occupancy',
+        iconBg:   'bg-violet-50',
+        iconColor:'text-violet-600',
+        node:     'Node 3 (Lecture Hall)',
+        normal:   { range:'0 – 85%',  color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'85 – 95%', color:'text-amber-600',   bg:'bg-amber-50',   action:'HVAC at max, alert facility manager' },
+        critical: { range:'> 95%',    color:'text-red-600',     bg:'bg-red-50',     action:'Capacity exceeded — notify security, restrict entry' },
+    },
+    {
+        sensor:   'Motion After Hours',
+        icon:     'motion',
+        iconBg:   'bg-orange-50',
+        iconColor:'text-orange-600',
+        node:     'Node 1 (Classroom 1)',
+        normal:   { range:'No motion after 18:00', color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'Motion detected, no class scheduled', color:'text-amber-600', bg:'bg-amber-50', action:'Log unscheduled occupancy, check timetable' },
+        critical: { range:'Motion detected after 18:00',         color:'text-red-600',   bg:'bg-red-50',   action:'Security alert — unauthorised access suspected' },
+    },
+    {
+        sensor:   'Ambient Light (Lux)',
+        icon:     'lighting',
+        iconBg:   'bg-yellow-50',
+        iconColor:'text-yellow-600',
+        node:     'Node 2 (Classroom 2)',
+        normal:   { range:'300 – 600 lux (daylight harvesting active)', color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'< 300 lux — lights at full brightness',      color:'text-amber-600',   bg:'bg-amber-50',   action:'Check ambient sensor, verify LED operation' },
+        critical: { range:'Lights ON with no class scheduled',           color:'text-red-600',     bg:'bg-red-50',     action:'Auto-off signal sent — CSS = FALSE' },
+    },
+    {
+        sensor:   'Smoke / Fire',
+        icon:     'fire',
+        iconBg:   'bg-red-50',
+        iconColor:'text-red-600',
+        node:     'Building-wide',
+        normal:   { range:'No smoke detected', color:'text-emerald-600', bg:'bg-emerald-50' },
+        warning:  { range:'—', color:'text-slate-400', bg:'bg-slate-50', action:'—' },
+        critical: { range:'Smoke sensor triggered', color:'text-red-600', bg:'bg-red-50', action:'Evacuate immediately — call Civil Defence: 997' },
+    },
 ];
 
 const LEVEL_CFG = {
@@ -49,20 +119,25 @@ function Card({ children, className = '' }) {
 }
 
 export default function Alerts() {
-    const [filter,   setFilter]  = useState('All');
-    const [search,   setSearch]  = useState('');
-    const [timeRange,setTime]    = useState('Last 24 Hours');
-    const [alerts,   setAlerts]  = useState(() => INITIAL_DERIVED.map((a, i) => ({
+    const { sensorState, campusTime, loading, isLive } = useLiveSensorState();
+    const [filter,       setFilter]       = useState('All');
+    const [search,       setSearch]       = useState('');
+    const [timeRange,    setTime]         = useState('Last 24 Hours');
+    const [showLegend,   setShowLegend]   = useState(true);
+    const [logPage,      setLogPage]      = useState(1);
+
+    // Live alerts derived from sensor state
+    const liveAlerts = deriveAlerts(sensorState, campusTime).map((a, i) => ({
         ...a,
         id: i,
         acknowledged: false,
-        // Map derived alert severity to display format
         title:    a.message,
-        location: `${a.node !== 'BLDG' ? `Node ${a.node} · ` : ''}${a.time}`,
+        location: a.node !== 'BLDG' ? `Node ${a.node}` : 'Building System',
         detected: a.time,
-        system:   a.node !== 'BLDG' ? `IoT Node ${a.node}` : 'Building System',
-    })));
-    const [logPage, setLogPage] = useState(1);
+        system:   a.node !== 'BLDG' ? `IoT Node ${a.node}` : 'Building',
+    }));
+
+    const [alerts, setAlerts] = useState(liveAlerts);
 
     const critCount = alerts.filter(a => a.severity === 'critical' && !a.acknowledged).length;
     const warnCount = alerts.filter(a => a.severity === 'warning'  && !a.acknowledged).length;
@@ -96,7 +171,7 @@ export default function Alerts() {
             {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3 flex-wrap">
-                    <h1 className="text-lg font-bold text-slate-900">Real-time Alerts & Notifications</h1>
+                    <h1 className="text-lg font-bold text-slate-900">Alerts & Notifications</h1>
                     {critCount > 0 && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-600 text-white text-[10px] font-bold rounded uppercase tracking-widest">
               <Icon name="critical" className="w-3 h-3" /> {critCount} Critical
@@ -108,21 +183,85 @@ export default function Alerts() {
             </span>
                     )}
                 </div>
-                <div className="flex items-center gap-3">
-                    <button onClick={markAllRead}
-                            className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 uppercase tracking-widest transition-colors flex items-center gap-1.5">
-                        <Icon name="check" className="w-3.5 h-3.5" /> Mark All Read
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowLegend(v => !v)}
+                            className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold rounded-xl border transition-colors
+                    ${showLegend ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                        <Icon name="info" className="w-3.5 h-3.5" />
+                        {showLegend ? 'Hide Legend' : 'Show Legend'}
                     </button>
-                    <button className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-colors shadow-md">
-                        <Icon name="sliders" className="w-3.5 h-3.5" /> Configure Rules
+                    <button onClick={markAllRead}
+                            className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 uppercase tracking-widest transition-colors flex items-center gap-1.5 px-3 py-2">
+                        <Icon name="check" className="w-3.5 h-3.5" /> Mark All Read
                     </button>
                 </div>
             </div>
 
+            {/* ── THRESHOLD LEGEND (Step 4 — professor feedback) ── */}
+            {showLegend && (
+                <Card>
+                    <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/40">
+                        <div className="flex items-center gap-2.5">
+                            <Icon name="info" className="w-4 h-4 text-blue-500" />
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-800">Alert Threshold Reference</h3>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Normal operating ranges and recommended responses for all 3 active nodes</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="divide-y divide-slate-50">
+                        {THRESHOLDS.map(t => (
+                            <div key={t.sensor} className="px-5 py-4 hover:bg-slate-50/50 transition-colors">
+                                <div className="flex items-start gap-4">
+                                    {/* Sensor icon */}
+                                    <div className={`w-9 h-9 ${t.iconBg} rounded-xl flex items-center justify-center shrink-0`}>
+                                        <Icon name={t.icon} className={`w-4 h-4 ${t.iconColor}`} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                            <p className="text-sm font-bold text-slate-800">{t.sensor}</p>
+                                            <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
+                        {t.node}
+                      </span>
+                                        </div>
+                                        {/* Three-column threshold table */}
+                                        <div className="grid grid-cols-3 gap-2 mt-2">
+                                            <div className={`${t.normal.bg} rounded-lg px-3 py-2`}>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" /> Normal
+                                                </p>
+                                                <p className={`text-[11px] font-bold ${t.normal.color}`}>{t.normal.range}</p>
+                                            </div>
+                                            <div className={`${t.warning.bg} rounded-lg px-3 py-2`}>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" /> Warning
+                                                </p>
+                                                <p className={`text-[11px] font-bold ${t.warning.color}`}>{t.warning.range}</p>
+                                                {t.warning.action && t.warning.action !== '—' && (
+                                                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">{t.warning.action}</p>
+                                                )}
+                                            </div>
+                                            <div className={`${t.critical.bg} rounded-lg px-3 py-2`}>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" /> Critical
+                                                </p>
+                                                <p className={`text-[11px] font-bold ${t.critical.color}`}>{t.critical.range}</p>
+                                                {t.critical.action && t.critical.action !== '—' && (
+                                                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">{t.critical.action}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
+
             {/* Filter bar */}
             <Card className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">Filter</span>
                     <div className="flex bg-slate-100 p-0.5 rounded-lg gap-0.5">
                         {['All','Critical','Warning','Information'].map(f => (
                             <button key={f} onClick={() => changeFilter(f)}
@@ -147,12 +286,13 @@ export default function Alerts() {
                 </div>
             </Card>
 
-            {/* Active alerts — derived from sensorState */}
+            {/* Active alerts */}
             <section className="space-y-3">
                 <div className="flex items-center gap-2.5">
                     <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)] animate-pulse" />
                     <h3 className="text-sm font-bold text-slate-800">Active System Events</h3>
                     <span className="text-[10px] text-slate-400 font-medium">— derived from IoT node telemetry</span>
+                    {isLive && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Live Firebase</span>}
                 </div>
 
                 {visibleAlerts.length === 0 ? (
@@ -160,11 +300,15 @@ export default function Alerts() {
                         <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center mx-auto mb-3">
                             <Icon name="check" className="w-5 h-5 text-emerald-600" />
                         </div>
-                        <p className="font-bold text-slate-700 text-sm">All clear</p>
-                        <p className="text-xs text-slate-400 mt-1">No active alerts in this category.</p>
+                        <p className="font-bold text-slate-700 text-sm">All systems nominal</p>
+                        <p className="text-xs text-slate-400 mt-1">No active alerts. All sensors within normal operating range.</p>
                     </Card>
                 ) : visibleAlerts.map(alert => {
                     const cfg = LEVEL_CFG[alert.severity] ?? LEVEL_CFG.info;
+                    // Find matching threshold for context
+                    const threshold = THRESHOLDS.find(t =>
+                        alert.message?.toLowerCase().includes(t.sensor.toLowerCase().split(' ')[0])
+                    );
                     return (
                         <div key={alert.id}
                              className="bg-white rounded-xl border border-slate-200/80 overflow-hidden transition-all hover:shadow-md"
@@ -194,6 +338,20 @@ export default function Alerts() {
                                             <span className="text-slate-200">·</span>
                                             <span className="flex items-center gap-1"><Icon name="settings" className="w-3 h-3" /> {alert.system}</span>
                                         </div>
+                                        {/* Contextual threshold hint */}
+                                        {threshold && (
+                                            <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                                                <Icon name="info" className="w-3 h-3 text-blue-400 shrink-0" />
+                                                <span>
+                          <span className="font-bold text-slate-600">{threshold.sensor} — </span>
+                          Normal: {threshold.normal.range} ·
+                                                    {alert.severity === 'critical'
+                                                        ? ` Critical: ${threshold.critical.range} — ${threshold.critical.action}`
+                                                        : ` Warning: ${threshold.warning.range} — ${threshold.warning.action}`
+                                                    }
+                        </span>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
@@ -223,7 +381,6 @@ export default function Alerts() {
                         <Icon name="download" className="w-3.5 h-3.5" /> Export CSV
                     </button>
                 </div>
-
                 <Card className="overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
@@ -246,7 +403,7 @@ export default function Alerts() {
                           <Icon name={lc.icon} className="w-2.5 h-2.5" /> {lc.label}
                         </span>
                                         </td>
-                                        <td className="px-5 py-3.5 font-semibold text-slate-900 whitespace-nowrap">{entry.event}</td>
+                                        <td className="px-5 py-3.5 font-semibold text-slate-900">{entry.event}</td>
                                         <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap">{entry.source}</td>
                                         <td className={`px-5 py-3.5 text-[11px] uppercase tracking-tight whitespace-nowrap ${ac.color}`}>{ac.label}</td>
                                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
@@ -264,7 +421,7 @@ export default function Alerts() {
             </span>
                         <nav className="flex items-center gap-1">
                             <button onClick={()=>setLogPage(p=>Math.max(1,p-1))} disabled={logPage===1}
-                                    className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                                    className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
                                 <Icon name="chevronLeft" className="w-3.5 h-3.5" />
                             </button>
                             {Array.from({length:totalPages},(_,i)=>i+1).map(p=>(
@@ -275,7 +432,7 @@ export default function Alerts() {
                                 </button>
                             ))}
                             <button onClick={()=>setLogPage(p=>Math.min(totalPages,p+1))} disabled={logPage===totalPages}
-                                    className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                                    className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
                                 <Icon name="chevronRight" className="w-3.5 h-3.5" />
                             </button>
                         </nav>

@@ -85,9 +85,11 @@ function EmergencyModal({ onClose }) {
 const NAV = [
     { to: '/',          label: 'Dashboard',         icon: 'dashboard'  },
     { to: '/building',  label: 'Building Overview', icon: 'building'   },
+    { to: '/rooms',     label: 'Rooms & Zones',     icon: 'rooms'      },
     { to: '/devices',   label: 'Device Twin',       icon: 'device'     },
     { to: '/alerts',    label: 'Alerts',            icon: 'alerts',    badge: 3 },
     { to: '/analytics', label: 'Reports',           icon: 'analytics'  },
+    { to: '/ontology',  label: 'Ontology',          icon: 'activity'   },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +154,17 @@ export default function Layout({ children, pageTitle = 'Dashboard' }) {
                     </button>
                 </div>
 
-
+                {/* Settings */}
+                <div className="px-3 pb-5 border-t border-white/5 pt-3">
+                    <NavLink to="/settings"
+                             className={({ isActive }) =>
+                                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all
+                     ${isActive ? 'bg-white/10 text-slate-200' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`
+                             }>
+                        <Icon name="settings" className="w-4 h-4" />
+                        Settings
+                    </NavLink>
+                </div>
             </aside>
 
             {/* ── Main ── */}
