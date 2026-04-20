@@ -104,13 +104,14 @@ const LINKS = [
 
 // ── Visual config per group ───────────────────────────────────────────────────
 const GROUP_STYLE = {
-    sensor:  { fill:'#1e3a5f', stroke:'#3b82f6', textColor:'#93c5fd', r:22 },
-    node:    { fill:'#1a3028', stroke:'#10b981', textColor:'#6ee7b7', r:28 },
-    gateway: { fill:'#2d1b0a', stroke:'#f59e0b', textColor:'#fcd34d', r:24 },
-    cloud:   { fill:'#1e1b4b', stroke:'#818cf8', textColor:'#c7d2fe', r:24 },
-    twin:    { fill:'#1e293b', stroke:'#2563eb', textColor:'#93c5fd', r:30 },
-    ai:      { fill:'#2d1256', stroke:'#8b5cf6', textColor:'#d8b4fe', r:26 },
-    output:  { fill:'#14290a', stroke:'#16a34a', textColor:'#86efac', r:22 },
+    // Brighter fills + white text for readability on dark canvas
+    sensor:  { fill:'#1d4ed8', stroke:'#60a5fa', textColor:'#ffffff', r:22 },
+    node:    { fill:'#047857', stroke:'#34d399', textColor:'#ffffff', r:28 },
+    gateway: { fill:'#b45309', stroke:'#fbbf24', textColor:'#ffffff', r:24 },
+    cloud:   { fill:'#4338ca', stroke:'#a5b4fc', textColor:'#ffffff', r:24 },
+    twin:    { fill:'#1e40af', stroke:'#93c5fd', textColor:'#ffffff', r:30 },
+    ai:      { fill:'#6d28d9', stroke:'#c4b5fd', textColor:'#ffffff', r:26 },
+    output:  { fill:'#166534', stroke:'#4ade80', textColor:'#ffffff', r:22 },
 };
 
 const GROUP_LABEL = {
@@ -164,7 +165,7 @@ export default function OntologyGraph() {
         const linksCopy = filteredLinks.map(l => ({ ...l }));
 
         svg.attr('width', w).attr('height', h)
-            .style('background', '#070d14')
+            .style('background', '#0f172a')
             .style('border-radius', '12px');
 
         // Defs — arrow markers
@@ -199,21 +200,21 @@ export default function OntologyGraph() {
         const gridG = svg.append('g').attr('opacity', 0.07);
         for (let x = 0; x < w; x += 28)
             for (let y = 0; y < h; y += 28)
-                gridG.append('circle').attr('cx', x).attr('cy', y).attr('r', 0.8).attr('fill', '#94a3b8');
+                gridG.append('circle').attr('cx', x).attr('cy', y).attr('r', 0.8).attr('fill', '#475569');
 
         // Links
         const linkG = svg.append('g');
         const link = linkG.selectAll('line')
             .data(linksCopy).enter().append('line')
-            .attr('stroke', '#1e3a5f')
+            .attr('stroke', '#334155')
             .attr('stroke-width', 1.5)
-            .attr('stroke-opacity', 0.5)
+            .attr('stroke-opacity', 0.8)
             .attr('marker-end', 'url(#arrow0)');
 
         // Link labels
         const linkLabel = svg.append('g')
             .selectAll('text').data(linksCopy).enter().append('text')
-            .attr('font-size', 8).attr('fill', '#334155')
+            .attr('font-size', 8).attr('fill', '#64748b')
             .attr('font-family', "'DM Mono', monospace")
             .attr('text-anchor', 'middle').attr('pointer-events', 'none')
             .text(d => d.label);

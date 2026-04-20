@@ -85,7 +85,6 @@ function EmergencyModal({ onClose }) {
 const NAV = [
     { to: '/',          label: 'Dashboard',         icon: 'dashboard'  },
     { to: '/building',  label: 'Building Overview', icon: 'building'   },
-    { to: '/rooms',     label: 'Rooms & Zones',     icon: 'rooms'      },
     { to: '/devices',   label: 'Device Twin',       icon: 'device'     },
     { to: '/alerts',    label: 'Alerts',            icon: 'alerts',    badge: 3 },
     { to: '/analytics', label: 'Reports',           icon: 'analytics'  },
@@ -97,9 +96,12 @@ const NAV = [
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Layout({ children, pageTitle = 'Dashboard' }) {
     const [emergencyOpen, setEmergencyOpen] = useState(false);
+    const [darkMode, setDarkMode] = useState(true);
+    const bg    = darkMode ? '#f4f6f9'     : '#ffffff';
+    const mainBg = darkMode ? '#f4f6f9'   : '#f8faff';
 
     return (
-        <div className="flex h-screen overflow-hidden bg-[#f4f6f9]" style={{ fontFamily: "'DM Sans', 'Plus Jakarta Sans', sans-serif" }}>
+        <div className="flex h-screen overflow-hidden" style={{ background: mainBg }} style={{ fontFamily: "'DM Sans', 'Plus Jakarta Sans', sans-serif" }}>
 
             {/* ── Sidebar ── */}
             <aside className="w-60 flex flex-col shrink-0 h-full"
@@ -184,6 +186,13 @@ export default function Layout({ children, pageTitle = 'Dashboard' }) {
                             <input type="text" placeholder="Search facilities..."
                                    className="pl-8 pr-4 py-1.5 text-sm bg-slate-100 border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 w-48 transition-all" />
                         </div>
+                        <button onClick={() => setDarkMode(d => !d)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors border"
+                                style={{ background: darkMode ? 'rgba(255,255,255,0.05)' : '#f1f5f9',
+                                    borderColor: darkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                                    color: darkMode ? '#94a3b8' : '#64748b' }}>
+                            {darkMode ? '☀ Light' : '🌙 Dark'}
+                        </button>
                         <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-semibold rounded-lg transition-colors shadow-sm shadow-blue-600/20">
                             <Icon name="share" className="w-3.5 h-3.5" />
                             Share Report
@@ -199,7 +208,7 @@ export default function Layout({ children, pageTitle = 'Dashboard' }) {
                 </header>
 
                 {/* Content */}
-                <main className="flex-1 overflow-y-auto p-5" style={{ background: '#f4f6f9' }}>
+                <main className="flex-1 overflow-y-auto p-5" style={{ background: mainBg }}>
                     {children}
                 </main>
             </div>

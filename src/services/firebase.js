@@ -115,6 +115,20 @@ export function subscribeToAlerts(callback) {
     });
 }
 
+
+/**
+ * Subscribe to AI predictions written by inference_server.py
+ * Path: /predictions/{roomId}
+ * Shape: { occupancy_class, occupancy_label, energy_mode, lighting,
+ *           override_needed, confidence, probabilities, timestamp }
+ */
+export function subscribeToPredictions(callback) {
+    const predRef = ref(db, 'predictions');
+    return onValue(predRef, (snap) => {
+        callback(snap.val() ?? {});
+    });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WRITES — DT → Node signals
 // ─────────────────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
     subscribeToTelemetry,
     subscribeToCampusClock,
+    subscribeToPredictions,
 } from './firebase';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,3 +272,92 @@ export function deriveAlerts(state, campusTime = CAMPUS_TIME) {
 
     return alerts;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI PREDICTIONS — written by inference_server.py to Firebase /predictions
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Fallback shown while inference_server.py warms up or is offline
+const FALLBACK_PREDICTIONS = {
+    Classroom_1: {
+        occupancy_class: 1, occupancy_label: 'scheduled',
+        energy_mode: 'auto', lighting: 1,
+        override_needed: false, confidence: 0.94,
+        probabilities: { empty: 0.03, scheduled: 0.94, unscheduled: 0.03 },
+    },
+    Classroom_2: {
+        occupancy_class: 0, occupancy_label: 'empty',
+        energy_mode: 'standby', lighting: 0,
+        override_needed: false, confidence: 0.91,
+        probabilities: { empty: 0.91, scheduled: 0.07, unscheduled: 0.02 },
+    },
+    Large_Lecture_Hall: {
+        occupancy_class: 2, occupancy_label: 'unscheduled',
+        energy_mode: 'auto', lighting: 1,
+        override_needed: true, confidence: 0.88,
+        probabilities: { empty: 0.05, scheduled: 0.07, unscheduled: 0.88 },
+    },
+};
+
+/**
+ * useAIPredictions()
+ *
+ * Subscribes to /predictions in Firebase (written every 5s by inference_server.py).
+ * Falls back to mock predictions if the server hasn't written yet.
+ *
+ * Returns:
+ *   predictions   — { Classroom_1: {...}, Classroom_2: {...}, Large_Lecture_Hall: {...} }
+ *   aiLive        — true if receiving real predictions from inference_server.py
+ *
+ * Each prediction shape:
+ *   occupancy_class   0=empty | 1=scheduled | 2=unscheduled
+ *   occupancy_label   'empty' | 'scheduled' | 'unscheduled'
+ *   energy_mode       'off' | 'eco' | 'standby' | 'auto'
+ *   lighting          0 | 1
+ *   override_needed   true when AI disagrees with schedule (UC-7 detection)
+ *   confidence        0.0 – 1.0
+ *   probabilities     { empty, scheduled, unscheduled }
+ *
+ * Usage:
+ *   const { predictions, aiLive } = useAIPredictions();
+ *   const lh = predictions.Large_Lecture_Hall;
+ *   lh.override_needed  → true when common hour spike detected
+ *   lh.occupancy_label  → 'unscheduled'
+ *   lh.confidence       → 0.88
+ */
+export function useAIPredictions() {
+    const [predictions, setPredictions] = useState(FALLBACK_PREDICTIONS);
+    const [aiLive,      setAiLive]      = useState(false);
+
+    useEffect(() => {
+        const unsub = subscribeToPredictions((data) => {
+            if (!data || Object.keys(data).length === 0) return;
+            setPredictions(prev => ({ ...FALLBACK_PREDICTIONS, ...data }));
+            setAiLive(true);
+        });
+        return () => unsub();
+    }, []);
+
+    return { predictions, aiLive };
+}
+
+/**
+ * Helper badge configs for rendering prediction results.
+ *
+ * Usage:
+ *   const badge = OCC_BADGE[predictions.Large_Lecture_Hall?.occupancy_class ?? 0];
+ */
+export const OCC_BADGE = {
+    0: { label:'Empty',       color:'#64748b', bg:'bg-slate-100',  text:'text-slate-600'  },
+    1: { label:'Scheduled',   color:'#2563eb', bg:'bg-blue-50',    text:'text-blue-700'   },
+    2: { label:'Unscheduled', color:'#ef4444', bg:'bg-red-50',     text:'text-red-700'    },
+};
+
+export const ENERGY_BADGE = {
+    off:     { label:'Off',     color:'#64748b', bg:'bg-slate-100',  text:'text-slate-500'  },
+    eco:     { label:'Eco',     color:'#16a34a', bg:'bg-green-50',   text:'text-green-700'  },
+    standby: { label:'Standby', color:'#f59e0b', bg:'bg-amber-50',   text:'text-amber-700'  },
+    auto:    { label:'Active',  color:'#10b981', bg:'bg-emerald-50', text:'text-emerald-700'},
+};
+
+// computeDatasetKPIs and getHourlyForRoom are exported directly from datasetState.js

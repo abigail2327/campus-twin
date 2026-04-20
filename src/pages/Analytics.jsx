@@ -17,91 +17,58 @@
 import { useState, useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import Icon from '../components/panels/Icon';
-import { useLiveSensorState } from '../services/sensorState';
+import { useLiveSensorState, useAIPredictions, OCC_BADGE, ENERGY_BADGE } from '../services/sensorState';
+import { DATASET_HOURLY, DATASET_CAMPUS_KPIS, SCENARIO_LABELS } from '../services/datasetState';
 import { exportEnergyData, exportFullReport } from '../services/exportService';
 
-// ── AI prediction engine (rule-based until ML model is connected) ─────────────
-// These functions mirror the logic the Random Forest model will implement.
-// When the model is trained, replace these with model inference calls.
-
-function predictOccupancy(temp, co2, motion, lux, hour, isScheduled) {
-    // 0 = unoccupied, 1 = scheduled, 2 = unscheduled
-    if (isScheduled && (motion || co2 > 600)) return 1;
-    if (!isScheduled && (motion || co2 > 700)) return 2; // unscheduled alert
-    if (co2 < 450 && !motion) return 0;
-    return 0;
-}
-
-function predictEnergyMode(occupancy, hour) {
-    // 'active' | 'standby' | 'off'
-    if (occupancy > 0) return 'active';
-    if (hour >= 7 && hour <= 20) return 'standby';
-    return 'off';
-}
-
-function predictLighting(motion, lux, css, lcs) {
-    if (lcs === 'ON') return true;
-    if (!css) return false;
-    if (motion && lux < 300) return true;
-    if (lux > 600) return false;
-    return motion;
-}
+// ── AI predictions now come from inference_server.py via Firebase /predictions
+// The rule-based functions below are removed — real Random Forest model is used.
 
 // ── MVP node data (Sept 15 2025, 30-min intervals) ───────────────────────────
 // Scoped to Classroom 1 (Node 1), Classroom 2 (Node 2), Lecture Hall (Node 3)
-const MVP_DATA = [
-    // Timestamps: 00:00 to 23:30 on Sept 15 (a Tuesday — class day)
-    // Format: { t, cr1_temp, cr1_motion, cr1_lux, cr2_temp, cr2_lux, lh_temp, lh_co2, lh_occ, lh_fan, scheduled }
-    { t:'00:00', cr1_temp:23.1, cr1_motion:false, cr1_lux:5,   cr2_temp:22.8, cr2_lux:4,   lh_temp:23.4, lh_co2:398,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'00:30', cr1_temp:23.0, cr1_motion:false, cr1_lux:5,   cr2_temp:22.7, cr2_lux:4,   lh_temp:23.3, lh_co2:395,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'01:00', cr1_temp:22.9, cr1_motion:false, cr1_lux:5,   cr2_temp:22.6, cr2_lux:4,   lh_temp:23.2, lh_co2:392,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'06:00', cr1_temp:22.8, cr1_motion:false, cr1_lux:40,  cr2_temp:22.5, cr2_lux:80,  lh_temp:23.1, lh_co2:400,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'07:00', cr1_temp:23.0, cr1_motion:false, cr1_lux:120, cr2_temp:22.7, cr2_lux:200, lh_temp:23.3, lh_co2:408,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'07:30', cr1_temp:23.1, cr1_motion:false, cr1_lux:180, cr2_temp:22.8, cr2_lux:280, lh_temp:23.4, lh_co2:415,  lh_occ:5,  lh_fan:40,  sched:false },
-    { t:'08:00', cr1_temp:23.6, cr1_motion:true,  cr1_lux:320, cr2_temp:23.1, cr2_lux:380, lh_temp:24.1, lh_co2:512,  lh_occ:42, lh_fan:40,  sched:true  },
-    { t:'08:30', cr1_temp:24.2, cr1_motion:true,  cr1_lux:380, cr2_temp:23.6, cr2_lux:420, lh_temp:24.8, lh_co2:689,  lh_occ:78, lh_fan:100, sched:true  },
-    { t:'09:00', cr1_temp:24.4, cr1_motion:false, cr1_lux:410, cr2_temp:24.1, cr2_lux:450, lh_temp:25.3, lh_co2:812,  lh_occ:85, lh_fan:100, sched:true  },
-    { t:'09:30', cr1_temp:24.6, cr1_motion:true,  cr1_lux:440, cr2_temp:24.3, cr2_lux:470, lh_temp:25.5, lh_co2:948,  lh_occ:88, lh_fan:100, sched:true  },
-    { t:'10:00', cr1_temp:24.8, cr1_motion:true,  cr1_lux:460, cr2_temp:24.5, cr2_lux:490, lh_temp:25.7, lh_co2:1012, lh_occ:91, lh_fan:100, sched:true  },
-    { t:'10:30', cr1_temp:25.0, cr1_motion:true,  cr1_lux:480, cr2_temp:24.7, cr2_lux:510, lh_temp:25.8, lh_co2:1124, lh_occ:93, lh_fan:100, sched:true  },
-    { t:'11:00', cr1_temp:24.8, cr1_motion:false, cr1_lux:490, cr2_temp:24.8, cr2_lux:520, lh_temp:25.6, lh_co2:1080, lh_occ:89, lh_fan:100, sched:true  },
-    { t:'11:30', cr1_temp:24.7, cr1_motion:true,  cr1_lux:500, cr2_temp:24.6, cr2_lux:530, lh_temp:25.5, lh_co2:1020, lh_occ:85, lh_fan:100, sched:true  },
-    { t:'12:00', cr1_temp:24.4, cr1_motion:false, cr1_lux:520, cr2_temp:24.1, cr2_lux:550, lh_temp:25.2, lh_co2:820,  lh_occ:12, lh_fan:40,  sched:false },
-    { t:'12:30', cr1_temp:24.1, cr1_motion:false, cr1_lux:510, cr2_temp:23.8, cr2_lux:540, lh_temp:24.9, lh_co2:712,  lh_occ:8,  lh_fan:40,  sched:false },
-    { t:'13:00', cr1_temp:24.8, cr1_motion:true,  cr1_lux:490, cr2_temp:24.4, cr2_lux:510, lh_temp:25.1, lh_co2:698,  lh_occ:62, lh_fan:100, sched:true  },
-    { t:'13:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:470, cr2_temp:24.7, cr2_lux:490, lh_temp:25.4, lh_co2:812,  lh_occ:75, lh_fan:100, sched:true  },
-    { t:'14:00', cr1_temp:25.2, cr1_motion:true,  cr1_lux:450, cr2_temp:24.8, cr2_lux:460, lh_temp:25.8, lh_co2:1042, lh_occ:85, lh_fan:100, sched:true  },
-    { t:'14:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:420, cr2_temp:24.7, cr2_lux:430, lh_temp:25.6, lh_co2:1012, lh_occ:82, lh_fan:100, sched:true  },
-    { t:'15:00', cr1_temp:25.3, cr1_motion:true,  cr1_lux:380, cr2_temp:24.9, cr2_lux:390, lh_temp:26.0, lh_co2:1198, lh_occ:92, lh_fan:100, sched:true  },
-    { t:'15:30', cr1_temp:25.1, cr1_motion:true,  cr1_lux:340, cr2_temp:24.8, cr2_lux:350, lh_temp:25.8, lh_co2:1142, lh_occ:88, lh_fan:100, sched:true  },
-    { t:'16:00', cr1_temp:25.4, cr1_motion:true,  cr1_lux:290, cr2_temp:25.1, cr2_lux:300, lh_temp:26.2, lh_co2:1284, lh_occ:93, lh_fan:100, sched:true  },
-    { t:'16:30', cr1_temp:25.1, cr1_motion:false, cr1_lux:240, cr2_temp:24.8, cr2_lux:250, lh_temp:25.7, lh_co2:1048, lh_occ:12, lh_fan:40,  sched:false },
-    { t:'17:00', cr1_temp:24.7, cr1_motion:false, cr1_lux:180, cr2_temp:24.4, cr2_lux:190, lh_temp:25.2, lh_co2:812,  lh_occ:8,  lh_fan:40,  sched:false },
-    { t:'17:30', cr1_temp:24.4, cr1_motion:false, cr1_lux:120, cr2_temp:24.1, cr2_lux:130, lh_temp:24.8, lh_co2:698,  lh_occ:5,  lh_fan:40,  sched:false },
-    { t:'18:00', cr1_temp:24.1, cr1_motion:false, cr1_lux:60,  cr2_temp:23.8, cr2_lux:65,  lh_temp:24.4, lh_co2:582,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'18:30', cr1_temp:23.8, cr1_motion:false, cr1_lux:20,  cr2_temp:23.5, cr2_lux:25,  lh_temp:24.1, lh_co2:498,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'19:00', cr1_temp:23.5, cr1_motion:false, cr1_lux:8,   cr2_temp:23.2, cr2_lux:10,  lh_temp:23.8, lh_co2:442,  lh_occ:0,  lh_fan:0,   sched:false },
-    { t:'22:00', cr1_temp:23.2, cr1_motion:false, cr1_lux:5,   cr2_temp:22.9, cr2_lux:5,   lh_temp:23.4, lh_co2:412,  lh_occ:0,  lh_fan:0,   sched:false },
-];
 
-// Enrich with AI predictions
-const ENRICHED = MVP_DATA.map(d => {
-    const hour = parseInt(d.t.split(':')[0]);
-    const lhOccClass  = predictOccupancy(d.lh_temp, d.lh_co2, false, 0, hour, d.sched);
-    const cr1OccClass = predictOccupancy(d.cr1_temp, 420, d.cr1_motion, d.cr1_lux, hour, d.sched);
-    const cr2OccClass = predictOccupancy(d.cr2_temp, 420, false, d.cr2_lux, hour, d.sched);
-    return {
-        ...d, hour,
-        ai_lh_occ_class:  lhOccClass,
-        ai_cr1_occ_class: cr1OccClass,
-        ai_cr2_occ_class: cr2OccClass,
-        ai_lh_energy:     predictEnergyMode(lhOccClass, hour),
-        ai_cr1_energy:    predictEnergyMode(cr1OccClass, hour),
-        ai_cr1_lighting:  predictLighting(d.cr1_motion, d.cr1_lux, d.sched, 'AUTO'),
-        ai_cr2_lighting:  predictLighting(false, d.cr2_lux, d.sched, 'AUTO'),
-        ai_lh_temp_pred:  d.lh_temp + (lhOccClass > 0 ? 0.3 : -0.2), // simple prediction offset
-    };
-});
+// ── Real dataset from twinergy_dataset_v3_noisy.csv ──────────────────────────
+const ROOM_KEY = {
+    'Classroom_1': 'classroom-1', 'Classroom_2': 'classroom-2', 'Large_Lecture_Hall': 'lecture-hall',
+};
+
+function buildEnriched(roomKey) {
+    return (DATASET_HOURLY[roomKey] ?? []).map(d => ({
+        t: d.hour, hour: d.hour_num,
+        cr1_temp: null, cr1_motion: d.pir > 0.3, cr1_lux: d.lux,
+        cr2_temp: null, cr2_lux: d.lux,
+        lh_temp: d.temp, lh_co2: d.co2,
+        lh_occ: Math.round(d.occupancy ?? 0), lh_fan: d.hvac === 'ON' ? 100 : 0,
+        sched: d.scenario === 'UC-A' || d.scenario === 'UC-E',
+        power_kw: d.power_kw, energy_kwh: d.energy_kwh,
+        occupancy: Math.round(d.occupancy ?? 0), occupancy_rate: d.occupancy_rate,
+        co2: d.co2, temp: d.temp, lux: d.lux,
+        is_common: d.is_common, is_unsched: d.is_unsched,
+        scenario: d.scenario, confidence: d.confidence, waste_kwh: d.waste_kwh,
+        ai_occ_class: d.is_unsched ? 2 : (d.occupancy > 1 ? 1 : 0),
+        ai_energy: d.scenario === 'UC-D' ? 'off' : d.occupancy > 1 ? 'active' : 'standby',
+        ai_lighting: d.lighting === 'ON' || (d.lux < 300 && d.occupancy > 0),
+        ai_lh_occ_class: d.is_unsched ? 2 : (d.occupancy > 1 ? 1 : 0),
+        ai_cr1_occ_class: d.is_unsched ? 2 : (d.occupancy > 1 ? 1 : 0),
+        ai_cr2_occ_class: d.is_unsched ? 2 : (d.occupancy > 1 ? 1 : 0),
+        ai_lh_energy: d.scenario === 'UC-D' ? 'off' : d.occupancy > 1 ? 'active' : 'standby',
+        ai_cr1_energy: d.scenario === 'UC-D' ? 'off' : d.occupancy > 1 ? 'active' : 'standby',
+        ai_cr1_lighting: d.lux < 300 && d.occupancy > 0,
+        ai_cr2_lighting: d.lux < 300 && d.occupancy > 0,
+        ai_lh_temp_pred: d.temp ? d.temp + 0.3 : null,
+    }));
+}
+
+const ENRICHED_CR1 = buildEnriched('classroom-1');
+const ENRICHED_CR2 = buildEnriched('classroom-2');
+const ENRICHED_LH  = buildEnriched('lecture-hall');
+const ENRICHED = ENRICHED_LH;
+
+function getRoomEnriched(roomId) {
+    if (roomId === 'Classroom_1') return ENRICHED_CR1;
+    if (roomId === 'Classroom_2') return ENRICHED_CR2;
+    return ENRICHED_LH;
+}
 
 const OCC_LABELS = { 0:'Unoccupied', 1:'Scheduled', 2:'Unscheduled' };
 const OCC_COLORS = { 0:'#64748b', 1:'#2563eb', 2:'#ef4444' };
@@ -144,7 +111,7 @@ function TemperatureChart({ room }) {
         return () => obs.disconnect();
     }, []);
 
-    const data = ENRICHED.filter(d => {
+    const data = getRoomEnriched(room).filter(d => {
         if (room === 'Classroom_1')        return d.cr1_temp != null;
         if (room === 'Classroom_2')        return d.cr2_temp != null;
         if (room === 'Large_Lecture_Hall') return d.lh_temp  != null;
@@ -264,7 +231,7 @@ function OccupancyChart({ room }) {
     // For Lecture Hall we have actual occupancy count
     // For classrooms we show PIR motion state + AI classification
     const isLH = room === 'Large_Lecture_Hall';
-    const data  = ENRICHED;
+    const data  = getRoomEnriched(room);
     const occKey    = room === 'Classroom_1' ? 'ai_cr1_occ_class' : room === 'Classroom_2' ? 'ai_cr2_occ_class' : 'ai_lh_occ_class';
     const rawOccKey = isLH ? 'lh_occ' : null;
 
@@ -379,7 +346,7 @@ function EnergyChart({ room }) {
         const g  = svg.attr('width',w).attr('height',h)
             .append('g').attr('transform',`translate(${margin.l},${margin.t})`);
 
-        const data   = ENRICHED;
+        const data   = getRoomEnriched(room);
         const xScale = d3.scalePoint().domain(data.map(d => d.t)).range([0, iw]);
         const modes  = ['active','standby','off'];
         const yScale = d3.scaleBand().domain(modes).range([0, ih]).padding(0.2);
@@ -593,6 +560,12 @@ const MVP_ROOMS = [
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Analytics() {
     const { sensorState, isLive } = useLiveSensorState();
+    const { predictions, aiLive }  = useAIPredictions();
+
+    // Map Firebase room keys → model room keys for prediction lookup
+    const lhPred  = predictions?.Large_Lecture_Hall ?? predictions?.['lecture-hall'];
+    const cr1Pred = predictions?.Classroom_1        ?? predictions?.['classroom-1'];
+    const cr2Pred = predictions?.Classroom_2        ?? predictions?.['classroom-2'];
     const [activeView, setActiveView] = useState('temperature');
     const [activeRoom, setActiveRoom] = useState('Large_Lecture_Hall');
 
@@ -611,14 +584,17 @@ export default function Analytics() {
                 <div>
                     <h1 className="text-lg font-bold text-slate-900">Analytics & AI Predictions</h1>
                     <p className="text-sm text-slate-400 mt-0.5">
-                        3 active nodes · Sept 15 2025 · Select a view and room below
+                        {DATASET_CAMPUS_KPIS.day_label} · 3 active nodes · Real dataset
                         {isLive && <span className="ml-2 text-emerald-600 font-semibold">· Live Firebase data</span>}
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 text-[11px] font-bold text-violet-600 bg-violet-50 border border-violet-100 px-3 py-1.5 rounded-full">
-            <Icon name="activity" className="w-3.5 h-3.5" />
-            AI Predictions Active
+          <span className={`flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors
+            ${aiLive
+              ? 'text-emerald-600 bg-emerald-50 border-emerald-100'
+              : 'text-violet-600 bg-violet-50 border-violet-100'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${aiLive ? 'bg-emerald-500 animate-pulse' : 'bg-violet-400'}`} />
+              {aiLive ? 'Live AI Model Active' : 'AI Model · Mock Data'}
           </span>
                     <button onClick={() => exportFullReport({ rooms:[], alerts:[], kpis:[], label:'analytics' })}
                             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-colors shadow-md">
@@ -700,12 +676,14 @@ export default function Analytics() {
             {/* ── AI PREDICTION SUMMARY CARDS ── */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {MVP_ROOMS.map(r => {
-                    const lastReading = ENRICHED[ENRICHED.length - 8]; // ~17:30
-                    const occKey    = r.id==='Classroom_1'?'ai_cr1_occ_class':r.id==='Classroom_2'?'ai_cr2_occ_class':'ai_lh_occ_class';
-                    const energyKey = r.id==='Classroom_1'?'ai_cr1_energy':r.id==='Large_Lecture_Hall'?'ai_lh_energy':'ai_lh_energy';
-                    const occClass  = lastReading[occKey] ?? 0;
-                    const energy    = lastReading[energyKey] ?? 'off';
-                    const sensor    = sensorState?.[r.id];
+                    // Use real model predictions from inference_server.py
+                    const pred = r.id === 'Classroom_1'        ? cr1Pred
+                        : r.id === 'Classroom_2'        ? cr2Pred
+                            : lhPred;
+                    const occClass = pred?.occupancy_class ?? 0;
+                    const energy   = pred?.energy_mode     ?? 'off';
+                    const confidence = pred?.confidence    ?? null;
+                    const sensor   = sensorState?.[r.id];
 
                     return (
                         <Card key={r.id} className={`p-4 ${safeRoom===r.id ? 'ring-2 ring-blue-400' : ''}`}>
@@ -723,10 +701,23 @@ export default function Analytics() {
                 </span>
                             </div>
                             <div className="space-y-1.5 text-[12px]">
+                                {pred?.override_needed && (
+                                    <div className="flex items-center gap-1.5 bg-red-50 border border-red-100 px-2 py-1 rounded-lg mb-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                        <span className="text-[10px] font-bold text-red-600 uppercase tracking-wide">Override Needed</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">AI Energy Mode</span>
                                     <span className="font-bold" style={{ color:ENERGY_COLORS[energy] }}>{energy.charAt(0).toUpperCase()+energy.slice(1)}</span>
                                 </div>
+                                {confidence !== null && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Confidence</span>
+                                        <span className={`font-bold ${confidence > 0.85 ? 'text-emerald-600' : confidence > 0.7 ? 'text-amber-600' : 'text-red-500'}`}
+                                              style={{ fontFamily:"'DM Mono',monospace" }}>{(confidence*100).toFixed(0)}%</span>
+                                    </div>
+                                )}
                                 {sensor?.temperature_c && (
                                     <div className="flex justify-between">
                                         <span className="text-slate-500">Temperature</span>
