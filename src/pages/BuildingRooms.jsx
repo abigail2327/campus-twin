@@ -9,13 +9,11 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/panels/Icon';
-import { MOCK_SENSOR_STATE, computeCampusKPIs, deriveAlerts, CAMPUS_TIME } from '../services/sensorState';
+import { useLiveSensorState, computeCampusKPIs, deriveAlerts } from '../services/sensorState';
 
 const BuildingTwin3D = lazy(() => import('../components/panels/BuildingTwin3D'));
 
-// ── Derive everything from sensorState — no local hardcoded data ──────────────
-const S   = MOCK_SENSOR_STATE;   // alias
-const KPI = computeCampusKPIs(S);
+// Phase 3: live Firebase data via useLiveSensorState hook
 
 // Floor plan geometry — room positions only (no sensor data here)
 const FLOOR_PLAN = {
@@ -134,9 +132,6 @@ function RoomDetail({ roomId, onClose }) {
     if (!room || !sensor) return null;
 
     const s   = SC[sensor.status] || SC.optimal;
-    const pct = sensor.max_occupancy
-        ? Math.min(100, Math.round((sensor.occupancy / sensor.max_occupancy) * 100))
-        : 0;
     const chartColor = sensor.status === 'critical' ? '#ef4444' : sensor.status === 'warning' ? '#f59e0b' : '#2563eb';
     const lightingText = sensor.lights === true ? 'Active' : sensor.lights === false ? 'Off' : '—';
     const lightingColor = sensor.lights ? 'text-emerald-600' : 'text-slate-400';
@@ -163,11 +158,7 @@ function RoomDetail({ roomId, onClose }) {
                 {/* 4 metric tiles — all from sensorState */}
                 <div className="grid grid-cols-2 gap-2">
                     {[
-                        { label:'Temp',     icon:'temperature', value:`${sensor.temperature_c?.toFixed(1) ?? '—'}°C`, cls: sensor.temperature_c > 25 ? 'text-amber-600' : 'text-slate-900' },
-                        { label:'Humidity', icon:'humidity',    value:`${sensor.humidity_pct?.toFixed(0) ?? sensor.humidity_pct ?? '—'}%`, cls:'text-slate-900' },
-                        { label:'CO₂',     icon:'co2',         value: sensor.co2_ppm ? `${sensor.co2_ppm} ppm` : '—',
-                            cls: sensor.co2_ppm > 1000 ? 'text-red-600' : sensor.co2_ppm > 600 ? 'text-amber-600' : 'text-emerald-600' },
-                        { label:'Lighting', icon:'lighting',    value: lightingText, cls: lightingColor },
+                        { label:'Lighting', icon:'lighting', value: lightingText, cls: lightingColor },
                     ].map(m => (
                         <div key={m.label} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
@@ -178,21 +169,11 @@ function RoomDetail({ roomId, onClose }) {
                     ))}
                 </div>
 
-                {/* Occupancy — directly from sensorState */}
-                {sensor.occupancy != null && sensor.max_occupancy != null && (
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                        <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
-                            <span className="flex items-center gap-1"><Icon name="occupancy" className="w-3 h-3" /> Occupancy</span>
-                            <span style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.occupancy} / {sensor.max_occupancy} · {pct}%</span>
-                        </div>
-                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${s.bar} transition-all`} style={{ width:`${pct}%` }} />
-                        </div>
-                    </div>
-                )}
+
 
                 {/* Node-specific fields */}
-                {sensor.node === 1 && sensor.motion != null && (
+                {/* Classroom A — PIR motion */}
+                {sensor.motion != null && (
                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex items-center justify-between">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
               <Icon name="motion" className="w-3 h-3" /> PIR Motion
@@ -202,36 +183,41 @@ function RoomDetail({ roomId, onClose }) {
             </span>
                     </div>
                 )}
-                {sensor.node === 3 && (
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 space-y-1.5">
-                        <div className="flex justify-between text-[11px]">
-                            <span className="font-semibold text-slate-500 flex items-center gap-1"><Icon name="hvac" className="w-3 h-3" /> Fan Speed</span>
-                            <span className="font-bold text-slate-700" style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.fan_speed_pct ?? '—'}%</span>
-                        </div>
-                        <div className="flex justify-between text-[11px]">
-                            <span className="font-semibold text-slate-500">Damper Angle</span>
-                            <span className="font-bold text-slate-700" style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.damper_angle ?? '—'}°</span>
-                        </div>
-                        <div className="flex justify-between text-[11px]">
-                            <span className="font-semibold text-slate-500">HCS Mode</span>
-                            <span className="font-bold text-blue-600">{sensor.hcs ?? '—'}</span>
-                        </div>
+
+                {/* Classroom B — LDR lux */}
+                {sensor.lux != null && (
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+              <Icon name="lighting" className="w-3 h-3" /> Ambient Lux
+            </span>
+                        <span className="text-sm font-bold text-slate-800" style={{ fontFamily:"'DM Mono',monospace" }}>
+              {sensor.lux} lx
+            </span>
                     </div>
                 )}
-                {sensor.node === 5 && (
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 space-y-1.5">
-                        <div className="flex justify-between text-[11px]">
-                            <span className="font-semibold text-slate-500 flex items-center gap-1"><Icon name="cpu" className="w-3 h-3" /> Active PCs</span>
-                            <span className="font-bold" style={{ fontFamily:"'DM Mono',monospace", color: sensor.pc_power ? '#22c55e' : '#94a3b8' }}>
-                {sensor.active_pcs ?? '—'} / {sensor.total_pcs ?? 30}
-              </span>
-                        </div>
-                        <div className="flex justify-between text-[11px]">
-                            <span className="font-semibold text-slate-500">PC Power</span>
-                            <span className={`font-bold ${sensor.pc_power ? 'text-emerald-600' : 'text-red-500'}`}>
-                {sensor.pc_power ? 'ON' : 'Shutdown'}
-              </span>
-                        </div>
+
+                {/* Lecture Hall — temperature */}
+                {sensor.temperature_c != null && (
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+              <Icon name="temperature" className="w-3 h-3" /> Temperature
+            </span>
+                        <span className={`text-sm font-bold ${sensor.temperature_c > 35 ? 'text-red-600' : sensor.temperature_c > 28 ? 'text-amber-600' : 'text-emerald-600'}`}
+                              style={{ fontFamily:"'DM Mono',monospace" }}>
+              {sensor.temperature_c.toFixed(1)}°C
+            </span>
+                    </div>
+                )}
+
+                {/* Lecture Hall — fire alert */}
+                {sensor.fire_alert != null && (
+                    <div className={`rounded-lg p-3 border flex items-center justify-between ${sensor.fire_alert ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-100'}`}>
+            <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${sensor.fire_alert ? 'text-red-500' : 'text-slate-400'}`}>
+              <Icon name="alerts" className="w-3 h-3" /> Fire Alert
+            </span>
+                        <span className={`text-sm font-bold ${sensor.fire_alert ? 'text-red-600' : 'text-slate-400'}`}>
+              {sensor.fire_alert ? '⚠ ACTIVE' : 'Normal'}
+            </span>
                     </div>
                 )}
 
@@ -249,7 +235,7 @@ function RoomDetail({ roomId, onClose }) {
                 )}
 
                 {/* Power */}
-                {sensor.power_w != null && (
+                {false && (
                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex items-center justify-between">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
               <Icon name="zap" className="w-3 h-3" /> INA219 Power
@@ -267,6 +253,8 @@ function RoomDetail({ roomId, onClose }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function BuildingRooms() {
     const navigate     = useNavigate();
+    const { sensorState: S, campusTime, loading, isLive } = useLiveSensorState();
+    const KPI = computeCampusKPIs(S);
     const [activeFloor, setActiveFloor] = useState(1);
     const [selectedId,  setSelectedId]  = useState(null);
     const [viewMode,    setViewMode]    = useState('3d');
@@ -401,9 +389,6 @@ export default function BuildingRooms() {
                                     const sensor = S[pr.id];
                                     const s = SC[sensor?.status] || SC.optimal;
                                     const isSel = selectedId === pr.id;
-                                    const pct = sensor?.max_occupancy
-                                        ? Math.min(100, Math.round((sensor.occupancy / sensor.max_occupancy) * 100))
-                                        : 0;
                                     return (
                                         <div key={pr.id} onClick={() => selectRoom(pr.id)}
                                              className={`absolute flex flex-col items-center justify-center gap-0.5 cursor-pointer rounded-lg border-2 transition-all duration-150
@@ -490,12 +475,11 @@ export default function BuildingRooms() {
                         </span>
                                                 <span className="flex items-center gap-1">
                           <Icon name="occupancy" className="w-3 h-3" />
-                                                    {sensor?.occupancy ?? '—'}/{sensor?.max_occupancy ?? '—'}
                         </span>
                                                 <span className="flex items-center gap-1">
                           <Icon name="zap" className="w-3 h-3" />
                                                     {sensor?.power_w != null
-                                                        ? sensor.power_w >= 1000 ? `${(sensor.power_w/1000).toFixed(1)}kW` : `${sensor.power_w.toFixed(0)}W`
+                                                        ? '—'
                                                         : '—'}
                         </span>
                                             </div>
@@ -521,7 +505,7 @@ export default function BuildingRooms() {
                     }
                 />
                 <div className="divide-y divide-slate-50">
-                    {deriveAlerts(S, CAMPUS_TIME).slice(0, 4).map((alert, i) => {
+                    {deriveAlerts(S, campusTime).slice(0, 4).map((alert, i) => {
                         const isC = alert.severity === 'critical';
                         return (
                             <div key={i} className="flex items-start gap-3.5 px-5 py-4 hover:bg-slate-50 transition-colors"
@@ -541,7 +525,7 @@ export default function BuildingRooms() {
                             </div>
                         );
                     })}
-                    {deriveAlerts(S, CAMPUS_TIME).length === 0 && (
+                    {deriveAlerts(S, campusTime).length === 0 && (
                         <div className="px-5 py-6 text-center">
                             <p className="text-sm text-slate-400">No active alerts</p>
                         </div>

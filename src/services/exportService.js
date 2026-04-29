@@ -109,7 +109,7 @@ export function exportAlertLog(events, filter = 'All') {
 export function exportRoomData(rooms) {
     if (!rooms?.length) return;
 
-    const headers = ['Room ID', 'Name', 'Floor', 'Status', 'Temperature (°C)', 'Humidity (%)', 'CO2 (ppm)', 'Lighting', 'Occupancy', 'Capacity', 'Exported At'];
+    const headers = ['Room ID', 'Name', 'Floor', 'Status', 'Temperature (°C)', 'Humidity (%)', 'Lighting', 'Occupancy', 'Capacity', 'Exported At'];
 
     const rows = rooms.map(r => ({
         'Room ID':            sanitizeCell(r.id),
@@ -118,7 +118,6 @@ export function exportRoomData(rooms) {
         'Status':             sanitizeCell(r.status),
         'Temperature (°C)':   sanitizeCell(r.temp),
         'Humidity (%)':       sanitizeCell(r.humidity),
-        'CO2 (ppm)':          sanitizeCell(r.co2),
         'Lighting':           sanitizeCell(r.lighting),
         'Occupancy':          sanitizeCell(r.occ),
         'Capacity':           sanitizeCell(r.cap),
@@ -205,7 +204,7 @@ export function exportFullReport(payload) {
 
     // Room data
     lines.push('--- ROOM SENSOR DATA ---');
-    lines.push('Room ID,Name,Floor,Status,Temp (°C),Humidity (%),CO2 (ppm),Occupancy,Capacity');
+    lines.push('Room ID,Name,Floor,Status,Temp (°C),Humidity (%),Occupancy,Capacity');
     rooms.forEach(r => {
         lines.push([
             sanitizeCell(r.id),
@@ -214,7 +213,6 @@ export function exportFullReport(payload) {
             sanitizeCell(r.status),
             sanitizeCell(r.temp),
             sanitizeCell(r.humidity),
-            sanitizeCell(r.co2),
             sanitizeCell(r.occ),
             sanitizeCell(r.cap),
         ].join(','));

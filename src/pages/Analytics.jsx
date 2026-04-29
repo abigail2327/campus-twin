@@ -2,9 +2,9 @@
  * Analytics.jsx — Phase 3 MVP
  * ─────────────────────────────────────────────────────────────────────────────
  * Selectable AI-driven chart views scoped to the 3 active nodes:
- *   Node 1 — Classroom 1   (PIR motion, lighting)
- *   Node 2 — Classroom 2   (ambient lux, lighting)
- *   Node 3 — Lecture Hall  (temperature, CO₂, occupancy, HVAC)
+ *   Node 1 — Classroom A   (PIR motion → LED lighting)
+ *   Node 2 — Classroom B   (LDR lux → adaptive LED dimming via AI)
+ *   Node 3 — Lecture Hall  (PIR motion, DHT temperature indoor+outdoor, fire sim, fan HVAC)
  *
  * Professor feedback implemented:
  *   ✓ Charts show AI predictions overlaid on sensor readings
@@ -35,14 +35,13 @@ const ROOM_KEY = {
 function buildEnriched(roomKey) {
     return (DATASET_HOURLY[roomKey] ?? []).map(d => ({
         t: d.hour, hour: d.hour_num,
-        cr1_temp: null, cr1_motion: d.pir > 0.3, cr1_lux: d.lux,
-        cr2_temp: null, cr2_lux: d.lux,
-        lh_temp: d.temp, lh_co2: d.co2,
-        lh_occ: Math.round(d.occupancy ?? 0), lh_fan: d.hvac === 'ON' ? 100 : 0,
+        cr1_motion: d.pir > 0.3,
+        cr2_lux: d.lux,
+        lh_temp: d.temp, lh_fan: d.hvac === 'ON' ? 100 : 0,
         sched: d.scenario === 'UC-A' || d.scenario === 'UC-E',
         power_kw: d.power_kw, energy_kwh: d.energy_kwh,
-        occupancy: Math.round(d.occupancy ?? 0), occupancy_rate: d.occupancy_rate,
-        co2: d.co2, temp: d.temp, lux: d.lux,
+
+        temp: d.temp, lux: d.lux,
         is_common: d.is_common, is_unsched: d.is_unsched,
         scenario: d.scenario, confidence: d.confidence, waste_kwh: d.waste_kwh,
         ai_occ_class: d.is_unsched ? 2 : (d.occupancy > 1 ? 1 : 0),
@@ -554,7 +553,7 @@ const CHART_VIEWS = [
 const MVP_ROOMS = [
     { id:'Classroom_1',        label:'Classroom 1',       node:1, icon:'motion',      nodeDesc:'PIR + Lux + Temp' },
     { id:'Classroom_2',        label:'Classroom 2',       node:2, icon:'lighting',    nodeDesc:'Ambient Lux + Temp' },
-    { id:'Large_Lecture_Hall', label:'Large Lecture Hall',node:3, icon:'temperature', nodeDesc:'Temp + CO₂ + Occupancy + HVAC' },
+    { id:'Large_Lecture_Hall', label:'Large Lecture Hall',node:3, icon:'temperature', nodeDesc:'PIR + DHT Temp + Fire Sim + Fan' },
 ];
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -724,13 +723,7 @@ export default function Analytics() {
                                         <span className="font-bold text-slate-700" style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.temperature_c.toFixed(1)}°C</span>
                                     </div>
                                 )}
-                                {sensor?.co2_ppm && (
-                                    <div className="flex justify-between">
-                                        <span className="text-slate-500">CO₂</span>
-                                        <span className={`font-bold ${sensor.co2_ppm>1000?'text-red-600':sensor.co2_ppm>600?'text-amber-600':'text-emerald-600'}`}
-                                              style={{ fontFamily:"'DM Mono',monospace" }}>{sensor.co2_ppm} ppm</span>
-                                    </div>
-                                )}
+
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">Sensors</span>
                                     <span className="text-slate-400 text-[10px]">{r.nodeDesc}</span>

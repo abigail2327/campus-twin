@@ -1,78 +1,85 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/panels/Icon';
 import { exportDeviceData } from '../services/exportService';
-import { MOCK_SENSOR_STATE, CAMPUS_TIME } from '../services/sensorState';
+import { useLiveSensorState } from '../services/sensorState';
 
-// ── MOCK DATA (replace with Firebase/Ditto subscription in Phase 3) ──────────
-// Device list derived from the 6 IoT nodes + building sensors
-const DEVICES = [
-    {
-        id:'SNSR-PIR-CR1',   name:'PIR + Temp Sensor — Classroom 1',    type:'Motion / Temp',    floor:1, room:'Classroom 1',     node:1,
-        status:'online',  firmware:'v2.4.1', battery:null, power:'mains',
-        iconName:'motion',
-        reported: { motion: MOCK_SENSOR_STATE.Classroom_1.motion, temperature_c: MOCK_SENSOR_STATE.Classroom_1.temperature_c, lss: MOCK_SENSOR_STATE.Classroom_1.lss, power_w: MOCK_SENSOR_STATE.Classroom_1.power_w },
-        desired:  { los: null, lcs: MOCK_SENSOR_STATE.Classroom_1.lcs, css: MOCK_SENSOR_STATE.Classroom_1.css },
-    },
-    {
-        id:'SNSR-LUX-CR2',   name:'Lux + Temp Sensor — Classroom 2',    type:'Ambient / Temp',   floor:1, room:'Classroom 2',     node:2,
-        status:'online',  firmware:'v2.1.0', battery:null, power:'mains',
-        iconName:'lighting',
-        reported: { ambient_dark: MOCK_SENSOR_STATE.Classroom_2.ambient_dark, lux: MOCK_SENSOR_STATE.Classroom_2.lux, lss: MOCK_SENSOR_STATE.Classroom_2.lss, power_w: MOCK_SENSOR_STATE.Classroom_2.power_w },
-        desired:  { los: null, lcs: MOCK_SENSOR_STATE.Classroom_2.lcs, css: MOCK_SENSOR_STATE.Classroom_2.css },
-    },
-    {
-        id:'SNSR-OCC-LH3',   name:'Occupancy Counter + CO₂ — Lecture Hall', type:'Occupancy / Air Quality', floor:1, room:'Large Lecture Hall', node:3,
-        status:'warning', firmware:'v3.0.2', battery:null, power:'mains',
-        iconName:'co2',
-        reported: { occupancy: MOCK_SENSOR_STATE.Large_Lecture_Hall.occupancy, temperature_c: MOCK_SENSOR_STATE.Large_Lecture_Hall.temperature_c, co2_ppm: MOCK_SENSOR_STATE.Large_Lecture_Hall.co2_ppm, damper_angle: MOCK_SENSOR_STATE.Large_Lecture_Hall.damper_angle, fan_speed_pct: MOCK_SENSOR_STATE.Large_Lecture_Hall.fan_speed_pct, lss: MOCK_SENSOR_STATE.Large_Lecture_Hall.lss, power_w: MOCK_SENSOR_STATE.Large_Lecture_Hall.power_w },
-        desired:  { hcs: MOCK_SENSOR_STATE.Large_Lecture_Hall.hcs, lcs: MOCK_SENSOR_STATE.Large_Lecture_Hall.lcs, los: null, occupancy_setpoint: 50 },
-    },
-    {
-        id:'SERVO-DMPR-LH3', name:'Servo Damper — Lecture Hall AHU',     type:'HVAC Actuator',   floor:1, room:'Large Lecture Hall', node:3,
-        status:'online',  firmware:'v1.5.0', battery:null, power:'mains',
-        iconName:'hvac',
-        reported: { damper_angle: MOCK_SENSOR_STATE.Large_Lecture_Hall.damper_angle, fan_speed_pct: MOCK_SENSOR_STATE.Large_Lecture_Hall.fan_speed_pct },
-        desired:  { damper_angle: 0, fan_speed_pct: 100 },
-    },
-    {
-        id:'SNSR-PIR-FAC4',  name:'PIR + Temp Sensor — Faculty Office',  type:'Occupancy / Temp', floor:2, room:'Faculty Office',   node:4,
-        status:'online',  firmware:'v2.0.3', battery:null, power:'mains',
-        iconName:'user',
-        reported: { faculty_present: MOCK_SENSOR_STATE.Faculty_Office.faculty_present, fss: MOCK_SENSOR_STATE.Faculty_Office.fss, power_w: MOCK_SENSOR_STATE.Faculty_Office.power_w },
-        desired:  { fss: false },
-    },
-    {
-        id:'LED-STRIP-LAB5', name:'LED Strips + PC Monitor — Computer Lab', type:'Lighting / Power', floor:2, room:'Computer Lab',    node:5,
-        status:'online',  firmware:'v4.1.0', battery:null, power:'mains',
-        iconName:'lighting',
-        reported: { pc_power: MOCK_SENSOR_STATE.Computer_Lab.pc_power, active_pcs: MOCK_SENSOR_STATE.Computer_Lab.active_pcs, led_strips: MOCK_SENSOR_STATE.Computer_Lab.led_strips, temperature_c: MOCK_SENSOR_STATE.Computer_Lab.temperature_c, humidity_pct: MOCK_SENSOR_STATE.Computer_Lab.humidity_pct, power_w: MOCK_SENSOR_STATE.Computer_Lab.power_w },
-        desired:  { css: MOCK_SENSOR_STATE.Computer_Lab.css, campus_clock: CAMPUS_TIME },
-    },
-    {
-        id:'AHU-FAN-MCH6',   name:'12V DC AHU Fan — Mechanical Room',   type:'HVAC / Power',     floor:2, room:'Mechanical Room', node:6,
-        status:'online',  firmware:'v1.8.2', battery:null, power:'mains',
-        iconName:'hvac',
-        reported: { fan_speed_pct: MOCK_SENSOR_STATE.Mechanical_Room.fan_speed_pct, damper_angle: MOCK_SENSOR_STATE.Mechanical_Room.damper_angle, power_w: MOCK_SENSOR_STATE.Mechanical_Room.power_w },
-        desired:  { damper_angle: MOCK_SENSOR_STATE.Large_Lecture_Hall.damper_angle },
-    },
-    {
-        id:'INA219-BLDG',    name:'INA219 Power Monitor — Building Bus', type:'Power Monitoring', floor:0, room:'All Rooms',       node:null,
-        status:'online',  firmware:'v1.2.0', battery:null, power:'mains',
-        iconName:'zap',
-        reported: { total_power_w: Object.values(MOCK_SENSOR_STATE).reduce((s,r)=>s+(r.power_w??0),0).toFixed(1), smoke: MOCK_SENSOR_STATE.Mechanical_Room.smoke },
-        desired:  { smoke_alert_enabled: true },
-    },
-];
+// Build device list from live sensorState — no more MOCK_SENSOR_STATE
+function buildDevices(s = {}) {
+    const cr1  = s.Classroom_1        ?? {};
+    const cr2  = s.Classroom_2        ?? {};
+    const lh   = s.Large_Lecture_Hall ?? {};
+    const mech = s.Mechanical_Room    ?? {};
 
-const TYPES          = ['All Types', ...Array.from(new Set(DEVICES.map(d => d.type)))];
+    return [
+        {
+            id:'SNSR-PIR-CR1',
+            name:'PIR Motion Sensor — Classroom A',
+            type:'Motion / Occupancy',
+            floor:1, room:'Classroom A', node:1,
+            status: cr1.status ?? 'online',
+            firmware:'v2.4.1', power:'mains', iconName:'motion',
+            reported: { motion: cr1.motion },
+            desired:  { lighting: cr1.lights ? 'on' : 'off' },
+            desc: 'HC-SR501 passive infrared. Triggers LED lighting when motion detected. Cross-referenced with INA219 for energy theft detection: power draw + no motion = anomaly flag.',
+        },
+        {
+            id:'SNSR-LDR-CR2',
+            name:'LDR Ambient Light Sensor — Classroom B',
+            type:'Adaptive Lighting',
+            floor:1, room:'Classroom B', node:2,
+            status: cr2.lux != null && cr2.lux < 80 ? 'warning' : cr2.status ?? 'online',
+            firmware:'v2.1.0', power:'mains', iconName:'lighting',
+            reported: { lux: cr2.lux },
+            desired:  { lighting: cr2.lights ? 'on' : 'off' },
+            desc: 'Light Dependent Resistor. Measures ambient brightness. AI model uses lux + time-of-day + schedule to issue dimming commands — not a simple threshold. High lux = LEDs dim. Low lux = full brightness.',
+        },
+        {
+            id:'SNSR-DHT-LH3',
+            name:'DHT Temperature Sensor — Lecture Hall',
+            type:'Temperature / HVAC',
+            floor:1, room:'Lecture Hall', node:3,
+            status: lh.fire_alert ? 'critical' : lh.temperature_c > 35 ? 'critical' : lh.temperature_c > 28 ? 'warning' : lh.status ?? 'online',
+            firmware:'v3.0.2', power:'mains', iconName:'temperature',
+            reported: { temperature_c: lh.temperature_c, fire_alert: lh.fire_alert, fan_active: lh.fan_active },
+            desired:  { fan: lh.fan_active ? 'on' : 'off' },
+            desc: 'DHT-compatible indoor temperature sensor. Controls HVAC fan. Paired with potentiometer fire simulator — AI distinguishes gradual heat (hot day) from sudden spike (fire event).',
+        },
+        {
+            id:'SNSR-POT-LH3',
+            name:'Potentiometer Fire Simulator — Lecture Hall',
+            type:'Emergency Anomaly',
+            floor:1, room:'Lecture Hall', node:3,
+            status: lh.fire_alert ? 'critical' : 'online',
+            firmware:'v1.0.0', power:'mains', iconName:'alerts',
+            reported: { fire_alert: lh.fire_alert, temperature_c: lh.temperature_c },
+            desired:  { alert_active: lh.fire_alert },
+            desc: 'Potentiometer configured as fire emergency simulator. Turning the dial creates an instantaneous temperature spike — simulating the thermal signature of a fire. AI is trained to distinguish this pattern from gradual hot-day heat rise.',
+        },
+        {
+            id:'INA219-BLDG',
+            name:'INA219 Power Sensor — Central (All Rooms)',
+            type:'Energy Metering',
+            floor:0, room:'All Rooms', node:null,
+            status: (mech.campus_power_w ?? 0) > 8000 ? 'warning' : 'online',
+            firmware:'v1.2.0', power:'mains', iconName:'zap',
+            reported: { campus_power_w: mech.campus_power_w ?? 0 },
+            desired:  {},
+            desc: 'Single INA219 power monitor for the entire building. Measures total campus energy consumption. Cross-referenced with PIR sensor in Classroom A: power draw with no motion detected = Energy Theft anomaly.',
+        },
+    ];
+}
+
 const STATUS_FILTERS = ['All','Online','Offline','Warning'];
 const PAGE_SIZE      = 6;
 
 const SC = {
-    online:  { pill:'bg-emerald-50 text-emerald-700 border-emerald-200', dot:'bg-emerald-500', label:'Online',  pulse:true  },
-    offline: { pill:'bg-red-50 text-red-700 border-red-200',             dot:'bg-red-500',     label:'Offline', pulse:false },
-    warning: { pill:'bg-amber-50 text-amber-700 border-amber-200',       dot:'bg-amber-400',   label:'Warning', pulse:false },
+    online:   { pill:'bg-emerald-50 text-emerald-700 border-emerald-200', dot:'bg-emerald-500', label:'Online',   pulse:true  },
+    offline:  { pill:'bg-red-50 text-red-700 border-red-200',             dot:'bg-red-500',     label:'Offline',  pulse:false },
+    warning:  { pill:'bg-amber-50 text-amber-700 border-amber-200',       dot:'bg-amber-400',   label:'Warning',  pulse:true  },
+    critical: { pill:'bg-red-50 text-red-700 border-red-200',             dot:'bg-red-500',     label:'Critical', pulse:true  },
 };
+const SC_DEFAULT = SC.online;
+const getSC = status => SC[status] ?? SC_DEFAULT;
 
 function Card({ children, className = '' }) {
     return (
@@ -95,7 +102,7 @@ function SignalLabel({ dir, label }) {
 
 // ── Device drawer ─────────────────────────────────────────────────────────────
 function DeviceDrawer({ device, onClose }) {
-    const sc = SC[device.status];
+    const sc = getSC(device.status);
     const hasDelta = Object.keys(device.desired).some(
         k => device.reported[k] !== undefined && String(device.reported[k]) !== String(device.desired[k])
     );
@@ -201,6 +208,12 @@ function DeviceDrawer({ device, onClose }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DeviceTwin() {
+    const { sensorState, campusTime, isLive } = useLiveSensorState();
+
+    // Rebuild device list from live sensor state
+    const DEVICES = useMemo(() => buildDevices(sensorState), [sensorState]);
+    const TYPES   = useMemo(() => ['All Types', ...Array.from(new Set(DEVICES.map(d => d.type)))], [DEVICES]);
+
     const [search,         setSearch]         = useState('');
     const [typeFilter,     setTypeFilter]     = useState('All Types');
     const [statusFilter,   setStatusFilter]   = useState('All');
@@ -261,8 +274,8 @@ export default function DeviceTwin() {
                 <SignalLabel dir="OUT" label="Node → DT (reported state)" />
                 <SignalLabel dir="IN"  label="DT → Node (desired state)" />
                 <span className="ml-auto text-slate-600 font-mono text-[10px]">
-          Campus Clock: {String(CAMPUS_TIME).padStart(4,'0').slice(0,2)}:{String(CAMPUS_TIME).padStart(4,'0').slice(2)}
-                    {CAMPUS_TIME >= 1800 ? '  ⚠ AFTER HOURS' : ''}
+          Campus Clock: {campusTime ? `${String(campusTime).padStart(4,'0').slice(0,2)}:${String(campusTime).padStart(4,'0').slice(2)}` : '—'}
+                    {campusTime >= 1800 ? '  ⚠ AFTER HOURS' : ''}
         </span>
             </div>
 
@@ -312,7 +325,7 @@ export default function DeviceTwin() {
                         {paged.length === 0
                             ? <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-400 text-sm">No devices match your filters.</td></tr>
                             : paged.map(device => {
-                                const sc = SC[device.status];
+                                const sc = getSC(device.status);
                                 return (
                                     <tr key={device.id} onClick={() => setSelectedDevice(device)}
                                         className="group hover:bg-blue-50/20 transition-colors cursor-pointer">

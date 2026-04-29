@@ -5,13 +5,14 @@
  */
 
 import { useState, lazy, Suspense } from 'react';
-import { MOCK_SENSOR_STATE } from '../services/sensorState';
+import { useLiveSensorState } from '../services/sensorState';
 import Icon from '../components/panels/Icon';
 
 const BuildingTwin3D = lazy(() => import('../components/panels/BuildingTwin3D'));
 
 export default function Twin3DPage() {
     const [selectedRoom, setSelectedRoom] = useState(null);
+    const { sensorState, isLive } = useLiveSensorState();
 
     return (
         <div className="w-screen h-screen flex flex-col overflow-hidden bg-slate-950"
@@ -30,9 +31,9 @@ export default function Twin3DPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-500 uppercase tracking-widest">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-            Mock Data · Phase 3 → Firebase
+          <span className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest ${isLive ? 'text-emerald-500' : 'text-amber-500'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            {isLive ? 'Live Firebase Data' : 'Simulated Data'}
           </span>
                     <button onClick={() => window.close()}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-all">
@@ -52,7 +53,7 @@ export default function Twin3DPage() {
                     </div>
                 }>
                     <BuildingTwin3D
-                        sensorState={MOCK_SENSOR_STATE}
+                        sensorState={sensorState}
                         selectedRoom={selectedRoom}
                         onRoomSelect={setSelectedRoom}
                         height="100%"
