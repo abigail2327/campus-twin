@@ -42,46 +42,123 @@ export const auth = getAuth(app);
 export const db   = getDatabase(app);
 
 // ── Field mapper: Firebase room data → Dashboard sensor format ────────────────
-// Handles the real schema at twinergy/rooms/{roomId}/environment
+// Maps the REAL Firebase schema (from Ditto/TTN/LoRa pipeline) to dashboard fields.
+//
+// classroom-1 real schema:
+//   occupancy.pir         → motion (1 = detected)
+//   occupancy.actual      → occupied (bool)
+//   lighting.status       → lights ('on'/'off')
+//   lighting.light        → light level (0-100)
+//   energy.powerDraw      → power in watts
+//
+// classroom-2 real schema:
+//   environment.ambient   → lux reading
+//   environment.css       → lights on/off (bool)
+//   environment.brightness→ brightness level
+//   environment.pot       → potentiometer
+//
+// lecture-hall real schema:
+//   environment.temperature → temperature_c
+//   environment.fireDetected→ fire_alert (bool)
+//   environment.campusMode  → mode string
+//   energy.fanSpeed         → fan speed %
+//   lighting.status         → lights ('on'/'off')
+//   occupancy.actual        → occupancy count
 export function mapFirebaseRoom(roomId, roomData) {
-    const env = roomData?.environment ?? {};
-    const attr = roomData?.attributes ?? {};
+    if (!roomData) return { status: 'offline', online: false };
+
+    const env  = roomData.environment ?? null;
+    const occ  = roomData.occupancy   ?? null;
+    const lgt  = roomData.lighting    ?? null;
+    const egy  = roomData.energy      ?? null;
+    const attr = roomData.attributes  ?? {};
 
     switch (roomId) {
-        case 'classroom-1':
+
+        case 'classroom-1': {
+            // classroom-1 has NO environment block — uses occupancy.* lighting.* energy.*
+            const hasPir = occ?.pir != null;
+            const hasOcc = occ?.actual != null;
+            if (!hasPir && !hasOcc && !lgt && !egy) {
+                return { status: 'offline', online: false };
+            }
+            // occupancy.pir = 1 means PIR motion detected
+            const motion   = occ?.pir != null ? Number(occ.pir) > 0 : Boolean(occ?.actual);
+            // lighting.status = 'on'/'off', lighting.light = lux level (0-100)
+            const lights   = lgt?.status === 'on';
+            const lux      = lgt?.light != null ? Number(lgt.light) : null;
+            // energy.powerDraw in mW → convert to W
+            const power_w  = egy?.powerDraw != null ? Number(egy.powerDraw) / 1000 : null;
+
             return {
-                status:    attr.status ?? 'optimal',
-                // PIR — environment.active is occupancy count (>0 = motion)
-                motion:    env.active != null ? env.active > 0 : null,
-                occupancy: env.active ?? null,
-                lights:    env.css ?? null,
-                override:  env.override ?? false,
-                _raw:      env,
+                status:      motion ? 'optimal' : 'optimal',
+                online:      true,
+                motion,
+                lights,
+                lux,
+                power_w,
+                occupancy:   motion ? 1 : 0,
+                _raw:        roomData,
             };
-        case 'classroom-2':
+        }
+
+        case 'classroom-2': {
+            // classroom-2 uses environment.ambient for lux
+            if (!env) return { status: 'offline', online: false };
+            const lux        = env.ambient    != null ? Number(env.ambient)    : null;
+            const lights     = env.css        != null ? Boolean(env.css)       : lgt?.status === 'on';
+            const brightness = env.brightness != null ? Number(env.brightness) : lgt?.brightness ?? null;
             return {
-                status:    attr.status ?? 'optimal',
-                // LDR — environment.ambient is lux reading
-                lux:       env.ambient ?? null,
-                lights:    env.css ?? null,
-                override:  env.override ?? false,
-                pot:       env.pot ?? null,
-                _raw:      env,
+                status:     lux != null && lux < 80 ? 'warning' : 'optimal',
+                online:     true,
+                lux,
+                lights,
+                brightness,
+                occupancy:  lux != null && lux > 50 ? 1 : 0,
+                override:   env.override != null ? Boolean(env.override) : false,
+                _raw:       roomData,
             };
-        case 'lecture-hall':
+        }
+
+        case 'lecture-hall': {
+            // lecture-hall uses environment.temperature, occupancy.actual, energy.fanSpeed
+            const hasEnv = env != null;
+            const hasOcc = occ != null;
+            if (!hasEnv && !hasOcc && !lgt && !egy) {
+                return { status: 'offline', online: false };
+            }
+            const temp      = env?.temperature  != null ? Number(env.temperature)   : null;
+            const fireAlert = env?.fireDetected != null ? Boolean(env.fireDetected)  : false;
+            const campusMode = env?.campusMode  ?? 'AUTO';
+            const lights    = lgt?.status === 'on';
+            const fanSpeed  = egy?.fanSpeed    != null ? Number(egy.fanSpeed)        : null;
+            // occupancy.actual = 100 means 100% occupied (lecture hall reports %)
+            const occActual = occ?.actual      != null ? Number(occ.actual)          : null;
+            const occupancy = occActual != null ? Math.round((occActual / 100) * 75) : null; // convert % → headcount
+
+            const statusLevel = fireAlert            ? 'critical'
+                : temp != null && temp > 35            ? 'critical'
+                    : temp != null && temp > 28            ? 'warning'
+                        : occActual != null && occActual > 85  ? 'warning'
+                            : 'optimal';
+
             return {
-                status:      attr.status ?? 'optimal',
-                // Temperature — environment.active carries temp in lecture hall
-                temperature_c: env.active ?? null,
-                // Fire sim — potentiometer spike (>900 = fire alert threshold)
-                fire_alert:  env.pot != null ? env.pot > 900 : false,
-                pot:         env.pot ?? null,
-                lights:      env.css ?? null,
-                override:    env.override ?? false,
-                _raw:        env,
+                status:        statusLevel,
+                online:        true,
+                temperature_c: temp,
+                fire_alert:    fireAlert,
+                campus_mode:   campusMode,
+                fan_speed_pct: fanSpeed,
+                lights,
+                occupancy,
+                occupancy_pct: occActual,
+                max_occupancy: 75,
+                _raw:          roomData,
             };
+        }
+
         default:
-            return { status: 'optimal', _raw: env };
+            return { status: 'optimal', online: true, _raw: roomData };
     }
 }
 

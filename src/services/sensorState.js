@@ -30,82 +30,67 @@ import {
 //   Large_Lecture_Hall → temperature_c (DHT), fire_alert (potentiometer spike)
 //   All rooms          → campus_power_w (INA219 central node)
 // ─────────────────────────────────────────────────────────────────────────────
+// FALLBACK_STATE — only used for rooms that have no Firebase node at all
+// The 3 active sensor rooms (Classroom_1, Classroom_2, Large_Lecture_Hall)
+// must show OFFLINE if Firebase has no live data — never show fake values
 const FALLBACK_STATE = {
-    Classroom_1: {
-        status:   'optimal',
-        motion:   false,
-        lights:   false,
-        campus_power_w: 0,
-    },
-    Classroom_2: {
-        status:   'optimal',
-        lux:      450,
-        lights:   true,
-        campus_power_w: 0,
-    },
-    Large_Lecture_Hall: {
-        status:        'optimal',
-        temperature_c: 24.2,
-        fire_alert:    false,
-        fan_active:    false,
-        lights:        false,
-        campus_power_w: 0,
-    },
-    Mechanical_Room: {
-        status:         'optimal',
-        campus_power_w: 8900,
-    },
-    Faculty_Office:  { status:'optimal' },
-    Computer_Lab:    { status:'optimal' },
-    Control_Room:    { status:'optimal' },
-    Lobby_Reception: { status:'optimal' },
+    // Active sensor rooms — no fake values, status offline until Firebase delivers
+    Classroom_1:        { status: 'offline', online: false },
+    Classroom_2:        { status: 'offline', online: false },
+    Large_Lecture_Hall: { status: 'offline', online: false },
+    // Non-sensor rooms — always show as optimal (no node deployed)
+    Mechanical_Room:    { status: 'optimal', online: true },
+    Faculty_Office:     { status: 'optimal', online: true },
+    Computer_Lab:       { status: 'optimal', online: true },
+    Control_Room:       { status: 'optimal', online: true },
+    Lobby_Reception:    { status: 'optimal', online: true },
+    Lounge_Study:       { status: 'optimal', online: true },
 };
 
-// Keep MOCK_SENSOR_STATE as alias so old imports don't break during migration
+// Keep MOCK_SENSOR_STATE as alias so old imports don't break
 export const MOCK_SENSOR_STATE = FALLBACK_STATE;
 export const CAMPUS_TIME = 1015;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MERGE helper — merges live Firebase data with fallback defaults
-// Ensures every room always has all required fields even if Firebase
-// only sends partial data (e.g. just power_w and temperature_c)
-// ─────────────────────────────────────────────────────────────────────────────
+// Active sensor rooms — these MUST come from Firebase live uplink
+const SENSOR_ROOMS = new Set(['Classroom_1', 'Classroom_2', 'Large_Lecture_Hall']);
+
+// ── MERGE helper ──────────────────────────────────────────────────────────────
+// For active sensor rooms: only use live Firebase data. If no live data, mark
+// as offline. Never inject fake sensor values.
+// For non-sensor rooms: keep fallback defaults (they have no Arduino node).
 function mergeWithFallback(liveData) {
     const merged = {};
+
     Object.keys(FALLBACK_STATE).forEach(roomId => {
-        merged[roomId] = {
-            ...FALLBACK_STATE[roomId],           // start with all defaults
-            ...(liveData[roomId] ?? {}),         // overlay live data
-        };
-
-        // Derive status from live sensor values if not explicitly set
-        const r = merged[roomId];
-        if (!liveData[roomId]?.status) {
-            if (r.fire_alert || r.temperature_c > 35) {
-                merged[roomId].status = 'critical';
-            } else if (
-                r.temperature_c > 25
-            ) {
-                merged[roomId].status = 'warning';
+        if (SENSOR_ROOMS.has(roomId)) {
+            // Active sensor room — use ONLY what Firebase sends
+            const live = liveData[roomId];
+            if (!live || live.status === 'offline' || Object.keys(live).length === 0) {
+                // No uplink received yet — show as offline, no fake values
+                merged[roomId] = { status: 'offline', online: false };
             } else {
-                merged[roomId].status = 'optimal';
+                // Live data received from LoRa → TTN → Ditto → Firebase pipeline
+                merged[roomId] = { ...live };
+                // Derive status from real sensor values
+                if (!live.status || live.status === 'optimal') {
+                    if (live.fire_alert || live.temperature_c > 35) {
+                        merged[roomId].status = 'critical';
+                    } else if (live.temperature_c > 28) {
+                        merged[roomId].status = 'warning';
+                    } else {
+                        merged[roomId].status = 'optimal';
+                    }
+                }
             }
-        }
-
-        // Derive HVAC state for Lecture Hall + Mechanical Room
-        if (roomId === 'Large_Lecture_Hall' && liveData[roomId]?.occupancy != null) {
-            const hvac = hvacFromOccupancy(
-            );
-        }
-        if (roomId === 'Mechanical_Room') {
-            const lh = merged.Large_Lecture_Hall;
-        }
-
-        // Derive PC shutdown warning (within 30 min of 18:00)
-        if (roomId === 'Computer_Lab') {
-            const ct = merged[roomId].campus_clock ?? CAMPUS_TIME;
+        } else {
+            // Non-sensor room — no Arduino node, use fallback
+            merged[roomId] = {
+                ...FALLBACK_STATE[roomId],
+                ...(liveData[roomId] ?? {}),
+            };
         }
     });
+
     return merged;
 }
 

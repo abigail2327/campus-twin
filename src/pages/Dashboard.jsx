@@ -38,31 +38,32 @@ const NODES = [
         label:    'Classroom 2',
         node:     2,
         type:     'LDR Lux → Adaptive Dimming',
-        capacity: 30,
+        capacity: null,   // no occupancy sensor in this room
         icon:     'lighting',
         color:    '#fbbf24',
     },
     {
         id:       'Large_Lecture_Hall',
-        label:    'Lecture Hall',
+        label:    'Multipurpose Hall',
         node:     3,
-        type:     'PIR + DHT Temp + Fire Sim + Fan',
-        capacity: 75,
+        type:     'DHT Temp + PIR + Fire Sim + Fan',
+        capacity: 100,
         icon:     'temperature',
         color:    '#10b981',
     },
 ];
 
-// ── Derive a simple status from sensor readings ───────────────────────────────
+// ── Derive a simple status from real sensor readings ──────────────────────────
 function getRoomStatus(sensor) {
-    if (!sensor) return { level: 'unknown', label: 'No Data',    color: '#64748b', bg: 'rgba(100,116,139,0.1)' };
-    if (sensor.fire_alert)                return { level: 'critical', label: 'Fire Alert!',     color: '#ef4444', bg: 'rgba(239,68,68,0.15)'  };
-    if (sensor.temperature_c > 35)        return { level: 'critical', label: 'Temp Spike',     color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   };
-    if (sensor.temperature_c > 28)        return { level: 'warning',  label: 'High Temp',      color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'  };
-    if (sensor.lux != null && sensor.lux < 80) return { level: 'warning', label: 'Low Light',  color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'  };
-    if (sensor.motion)                    return { level: 'normal',   label: 'Motion Detected', color: '#3b82f6', bg: 'rgba(59,130,246,0.1)'  };
-    if (sensor.occupancy > 0)             return { level: 'normal',   label: 'Occupied',       color: '#10b981', bg: 'rgba(16,185,129,0.1)'  };
-    return                                 { level: 'normal',   label: 'Available',     color: '#10b981', bg: 'rgba(16,185,129,0.1)'  };
+    if (!sensor || sensor.status === 'offline') return { level:'offline', label:'No Uplink',  color:'#64748b', bg:'rgba(100,116,139,0.1)' };
+    if (sensor.fire_alert)          return { level:'critical', label:'Fire Alert!',     color:'#ef4444', bg:'rgba(239,68,68,0.15)'  };
+    if (sensor.temperature_c > 35)  return { level:'critical', label:'Temp Spike',      color:'#ef4444', bg:'rgba(239,68,68,0.1)'   };
+    if (sensor.temperature_c > 28)  return { level:'warning',  label:'High Temp',       color:'#f59e0b', bg:'rgba(245,158,11,0.1)'  };
+    if (sensor.lux != null && sensor.lux < 80) return { level:'warning', label:'Low Light', color:'#f59e0b', bg:'rgba(245,158,11,0.1)' };
+    if (sensor.motion)              return { level:'normal',   label:'Motion Detected', color:'#3b82f6', bg:'rgba(59,130,246,0.1)'  };
+    if (sensor.occupied)            return { level:'normal',   label:'Occupied',        color:'#10b981', bg:'rgba(16,185,129,0.1)'  };
+    if (sensor.occupancy > 0)       return { level:'normal',   label:'Occupied',        color:'#10b981', bg:'rgba(16,185,129,0.1)'  };
+    return                           { level:'normal',   label:'Available',      color:'#10b981', bg:'rgba(16,185,129,0.1)'  };
 }
 
 // ── Status icon ───────────────────────────────────────────────────────────────
@@ -77,15 +78,8 @@ function StatusDot({ level, size = 10 }) {
 
 // ── Node status card ──────────────────────────────────────────────────────────
 function NodeCard({ node, sensor, selected, onSelect, dark }) {
-    const status  = getRoomStatus(sensor);
-    const occ     = sensor?.occupancy ?? 0;
-    const cap     = node.capacity;
-    const occPct  = Math.round((occ / cap) * 100);
-    // Power is campus-wide (single INA219), not per room — show campus total on LH card only
-    const campusPowerW = sensor?.campus_power_w ?? null;
-    const powerStr = sensor?.room_id === 'Large_Lecture_Hall' || campusPowerW
-        ? (campusPowerW != null ? (campusPowerW >= 1000 ? `${(campusPowerW/1000).toFixed(1)} kW` : `${Math.round(campusPowerW)} W`) : '—')
-        : null;
+
+    const isOffline = !sensor || sensor.status === 'offline' || sensor.online === false;
 
     const bg     = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)';
     const border = selected
@@ -93,6 +87,68 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
         : dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)';
     const textPrimary   = dark ? '#f1f5f9' : '#0f172a';
     const textSecondary = dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.5)';
+
+    // ── Offline card ─────────────────────────────────────────────────────────────
+    if (isOffline) {
+        return (
+            <div onClick={() => onSelect(selected ? null : node.id)}
+                 className="rounded-2xl p-4 cursor-pointer transition-all"
+                 style={{ background: bg, border, opacity: 0.6,
+                     boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                             style={{ background: 'rgba(100,116,139,0.1)' }}>
+                            <Icon name={node.icon} className="w-4 h-4" style={{ color: '#475569' }} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold leading-tight" style={{ color: textPrimary }}>{node.label}</p>
+                            <p className="text-[10px] font-semibold text-slate-400">Node {node.node}</p>
+                        </div>
+                    </div>
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
+                </div>
+                <span className="text-xs font-bold px-2 py-1 rounded-lg text-slate-500"
+                      style={{ background: 'rgba(100,116,139,0.1)' }}>
+          No Uplink
+        </span>
+                <p className="text-[10px] mt-3 leading-relaxed" style={{ color: textSecondary }}>
+                    Waiting for LoRa uplink via TTN → Ditto → Firebase
+                </p>
+                <p className="text-[9px] mt-1.5 font-semibold uppercase tracking-widest"
+                   style={{ color: textSecondary }}>{node.type}</p>
+            </div>
+        );
+    }
+
+    // ── Live card ─────────────────────────────────────────────────────────────────
+    const status = getRoomStatus(sensor);
+    const metricBg = dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+
+    // Per-room metric config
+    const isC1 = node.id === 'Classroom_1';
+    const isC2 = node.id === 'Classroom_2';
+    const isLH = node.id === 'Large_Lecture_Hall';
+
+    // CR1: binary occupancy from PIR (0 or 1) — shown as a pill, not a count
+    const cr1Occupied = isC1 ? (sensor.occupancy != null ? sensor.occupancy > 0 : sensor.motion) : null;
+
+    // LH: occupancy as headcount from occupancy_pct
+    const lhOccupancy    = isLH ? sensor.occupancy     : null;
+    const lhOccupancyPct = isLH ? sensor.occupancy_pct : null;
+
+    // Right metric per room
+    const rightLabel = isC2 ? 'Ambient Lighting' : isLH ? 'Temperature' : 'Power Draw';
+    const rightValue = isC2
+        ? (sensor.lux != null ? `${sensor.lux} lx` : '—')
+        : isLH
+            ? (sensor.temperature_c != null ? `${sensor.temperature_c.toFixed(1)}°C` : '—')
+            : (sensor.power_w != null ? (sensor.power_w >= 1000 ? `${(sensor.power_w/1000).toFixed(2)} kW` : `${Math.round(sensor.power_w)} W`) : '—');
+    const rightColor = isC2
+        ? (sensor.lux != null && sensor.lux < 80 ? '#f59e0b' : '#10b981')
+        : isLH
+            ? (sensor.temperature_c > 35 ? '#ef4444' : sensor.temperature_c > 28 ? '#f59e0b' : '#10b981')
+            : textPrimary;
 
     return (
         <div onClick={() => onSelect(selected ? null : node.id)}
@@ -111,9 +167,7 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
                         <p className="text-[10px] font-semibold" style={{ color: node.color }}>Node {node.node}</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                    <StatusDot level={status.level} />
-                </div>
+                <StatusDot level={status.level} />
             </div>
 
             {/* Status label */}
@@ -124,44 +178,83 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
         </span>
             </div>
 
-            {/* Key metrics — 2 most important things */}
-            <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl p-2.5"
-                     style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
-                    <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
-                       style={{ color: textSecondary }}>Occupancy</p>
-                    <p className="text-sm font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                        {occ}<span className="text-[10px] font-normal" style={{ color: textSecondary }}>/{cap}</span>
-                    </p>
-                    <div className="mt-1.5 h-1 rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}>
-                        <div className="h-full rounded-full transition-all"
-                             style={{ width:`${occPct}%`, background: occPct > 85 ? '#ef4444' : occPct > 60 ? '#f59e0b' : node.color }} />
+            {/* Metrics grid */}
+            <div className={`grid gap-2 ${isLH ? 'grid-cols-2' : 'grid-cols-1'}`}>
+
+                {/* CR1 — binary occupancy pill (PIR: 0 or 1) */}
+                {isC1 && (
+                    <div className="rounded-xl p-2.5" style={{ background: metricBg }}>
+                        <p className="text-[9px] font-bold uppercase tracking-widest mb-1.5"
+                           style={{ color: textSecondary }}>Occupancy</p>
+                        <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ background: cr1Occupied ? '#10b981' : '#475569',
+                        boxShadow: cr1Occupied ? '0 0 6px #10b981' : 'none' }} />
+                            <span className="text-sm font-bold" style={{
+                                color: cr1Occupied ? '#10b981' : textSecondary,
+                                fontFamily:"'DM Mono',monospace"
+                            }}>
+                {cr1Occupied == null ? '—' : cr1Occupied ? 'OCCUPIED' : 'VACANT'}
+              </span>
+                        </div>
                     </div>
-                </div>
-                <div className="rounded-xl p-2.5"
-                     style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
-                    <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
-                       style={{ color: textSecondary }}>Campus Load</p>
-                    <p className="text-sm font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                        {powerStr}
-                    </p>
-                    {/* Show the primary sensor for this room */}
-                    {sensor?.motion != null && node.id === 'Classroom_1' && (
-                        <p className="text-[10px] mt-1 font-semibold" style={{ color: sensor.motion ? '#3b82f6' : textSecondary }}>
-                            {sensor.motion ? '● Motion detected' : '○ No motion'}
+                )}
+
+                {/* CR2 — single full-width metric (no occupancy) */}
+                {isC2 && (
+                    <div className="rounded-xl p-2.5" style={{ background: metricBg }}>
+                        <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
+                           style={{ color: textSecondary }}>{rightLabel}</p>
+                        <p className="text-sm font-bold" style={{ color: rightColor, fontFamily:"'DM Mono',monospace" }}>
+                            {rightValue}
                         </p>
-                    )}
-                    {sensor?.lux != null && node.id === 'Classroom_2' && (
-                        <p className="text-[10px] mt-1 font-semibold" style={{ color: sensor.lux < 80 ? '#f59e0b' : '#10b981', fontFamily:"'DM Mono',monospace" }}>
-                            {sensor.lux} lx ambient
-                        </p>
-                    )}
-                    {sensor?.temperature_c != null && node.id === 'Large_Lecture_Hall' && (
-                        <p className="text-[10px] mt-1 font-semibold" style={{ color: sensor.temperature_c > 35 ? '#ef4444' : sensor.temperature_c > 28 ? '#f59e0b' : '#10b981', fontFamily:"'DM Mono',monospace" }}>
-                            {sensor.temperature_c.toFixed(1)}°C indoor
-                        </p>
-                    )}
-                </div>
+                        {sensor.brightness != null && (
+                            <p className="text-[10px] mt-1" style={{ color: textSecondary }}>
+                                LED {sensor.brightness}% brightness
+                            </p>
+                        )}
+                    </div>
+                )}
+
+                {/* LH — left: occupancy headcount, right: temperature */}
+                {isLH && (
+                    <>
+                        <div className="rounded-xl p-2.5" style={{ background: metricBg }}>
+                            <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
+                               style={{ color: textSecondary }}>Occupancy</p>
+                            <p className="text-sm font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
+                                {lhOccupancy != null ? lhOccupancy : '—'}
+                                {node.capacity && lhOccupancy != null && (
+                                    <span className="text-[10px] font-normal" style={{ color: textSecondary }}>/{node.capacity}</span>
+                                )}
+                            </p>
+                            {lhOccupancyPct != null && (
+                                <>
+                                    <div className="mt-1.5 h-1 rounded-full overflow-hidden"
+                                         style={{ background: dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}>
+                                        <div className="h-full rounded-full transition-all"
+                                             style={{ width:`${Math.min(100, lhOccupancyPct)}%`,
+                                                 background: lhOccupancyPct > 85 ? '#ef4444' : lhOccupancyPct > 60 ? '#f59e0b' : node.color }} />
+                                    </div>
+                                    <p className="text-[10px] mt-1" style={{ color: textSecondary }}>{lhOccupancyPct}% full</p>
+                                </>
+                            )}
+                        </div>
+                        <div className="rounded-xl p-2.5" style={{ background: metricBg }}>
+                            <p className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
+                               style={{ color: textSecondary }}>{rightLabel}</p>
+                            <p className="text-sm font-bold" style={{ color: rightColor, fontFamily:"'DM Mono',monospace" }}>
+                                {rightValue}
+                            </p>
+                            {sensor.fan_speed_pct != null && (
+                                <p className="text-[10px] mt-1" style={{ color: textSecondary }}>
+                                    Fan {sensor.fan_speed_pct}%
+                                </p>
+                            )}
+                        </div>
+                    </>
+                )}
+
             </div>
 
             {/* Sensor type label */}
@@ -172,32 +265,63 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
 }
 
 // ── Energy summary card ───────────────────────────────────────────────────────
-function EnergySummary({ kpi, dark }) {
+function EnergySummary({ kpi, sensorState, dark }) {
     const bg          = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)';
     const border      = dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)';
     const textPrimary = dark ? '#f1f5f9' : '#0f172a';
     const textMuted   = dark ? 'rgba(255,255,255,0.35)' : 'rgba(15,23,42,0.4)';
-    const wastePct    = kpi.wastePct ?? 12.3;
-    const wasteColor  = wastePct > 20 ? '#ef4444' : wastePct > 10 ? '#f59e0b' : '#10b981';
+
+    // Live power draw from Firebase energy.powerDraw (classroom-1 node has INA219)
+    // firebase.js maps energy.powerDraw (mW) → power_w (W) for Classroom_1
+    const livePowerW   = sensorState?.Classroom_1?.power_w ?? null;
+    const isLive       = livePowerW != null && livePowerW > 0;
+    const livePowerStr = isLive
+        ? (livePowerW >= 1000 ? `${(livePowerW/1000).toFixed(2)} kW` : `${Math.round(livePowerW)} W`)
+        : null;
+
+    const wastePct  = kpi.wastePct ?? 12.3;
+    const wasteColor = wastePct > 20 ? '#ef4444' : wastePct > 10 ? '#f59e0b' : '#10b981';
 
     return (
         <div className="rounded-2xl p-4 flex flex-col gap-3"
              style={{ background: bg, border, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
-            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: textMuted }}>
-                Today's Energy
-            </p>
-
-            {/* Main energy number */}
-            <div>
-                <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                    {kpi.energyToday_kwh ?? DATASET_CAMPUS_KPIS.total_energy_kwh}
-                    <span className="text-base font-normal ml-1" style={{ color: textMuted }}>kWh</span>
+            <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: textMuted }}>
+                    Today's Energy
                 </p>
-                <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>across 3 active nodes</p>
+                {isLive && (
+                    <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Live
+          </span>
+                )}
+            </div>
+
+            {/* Main energy number — live powerDraw if available */}
+            <div>
+                {isLive ? (
+                    <>
+                        <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
+                            {livePowerStr}
+                            <span className="text-sm font-normal ml-1" style={{ color: textMuted }}>now</span>
+                        </p>
+                        <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>
+                            from energy.powerDraw · Node 1
+                        </p>
+                    </>
+                ) : (
+                    <>
+                        <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
+                            {kpi.energyToday_kwh ?? DATASET_CAMPUS_KPIS.total_energy_kwh}
+                            <span className="text-base font-normal ml-1" style={{ color: textMuted }}>kWh</span>
+                        </p>
+                        <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>dataset reference · no live data</p>
+                    </>
+                )}
             </div>
 
             {/* Waste */}
-            <div className="rounded-xl p-3" style={{ background: `${wasteColor}12`, border:`1px solid ${wasteColor}30` }}>
+            <div className="rounded-xl p-3" style={{ background:`${wasteColor}12`, border:`1px solid ${wasteColor}30` }}>
                 <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: wasteColor }}>
                         Energy Wasted
@@ -228,12 +352,10 @@ function EnergySummary({ kpi, dark }) {
 }
 
 // ── Occupancy Spike Prediction Panel ─────────────────────────────────────────
-// Reads from /predictions/* (written by inference.py every 5s)
-// Shows WHERE and WHEN occupancy is about to spike across all 3 nodes
 const SPIKE_NODES = [
-    { dashId:'Classroom_1',        fbId:'classroom-1',  label:'Classroom A', color:'#3b82f6', cap:30  },
-    { dashId:'Classroom_2',        fbId:'classroom-2',  label:'Classroom B', color:'#fbbf24', cap:30  },
-    { dashId:'Large_Lecture_Hall', fbId:'lecture-hall', label:'Lecture Hall',color:'#f87171', cap:75  },
+    { dashId:'Classroom_1',        fbId:'classroom-1',  label:'Classroom A', node:1, color:'#3b82f6' },
+    { dashId:'Classroom_2',        fbId:'classroom-2',  label:'Classroom B', node:2, color:'#f59e0b' },
+    { dashId:'Large_Lecture_Hall', fbId:'lecture-hall', label:'Multipurpose Hall', node:3, color:'#f87171' },
 ];
 
 function OccupancySpikePanel({ sensorState, dark }) {
@@ -250,166 +372,187 @@ function OccupancySpikePanel({ sensorState, dark }) {
         return unsub;
     }, []);
 
-    // For each node determine: current state + 30-min forecast from inference.py
     const spikes = SPIKE_NODES.map(node => {
         const sensor = sensorState?.[node.dashId] ?? {};
         const pred   = predictions[node.fbId] ?? predictions[node.dashId] ?? null;
 
-        // Current occupancy signal
         const isOccupiedNow = node.dashId === 'Classroom_1' ? !!sensor.motion
             : node.dashId === 'Classroom_2' ? (sensor.lux ?? 0) > 50
                 : (sensor.temperature_c ?? 0) > 0;
 
-        const forecast    = pred?.forecast_30min ?? null;   // "OCCUPIED" | "EMPTY"
-        const confidence  = pred?.confidence ?? null;
-        const alerts      = pred?.alerts ?? [];
+        const forecast     = pred?.forecast_30min ?? null;
+        const confidence   = pred?.confidence ?? null;
+        const alerts       = pred?.alerts ?? [];
         const hasFireAlert = sensor.fire_alert || alerts.includes('FIRE_ANOMALY');
         const hasPowerLeak = alerts.includes('POWER_LEAK');
-
-        // Spike = currently empty but forecast says OCCUPIED in 30 min
-        const isSpiking   = !isOccupiedNow && forecast === 'OCCUPIED';
-        // Waste  = currently occupied but forecast says EMPTY (lights/power wasted)
-        const isWaste     = isOccupiedNow  && forecast === 'EMPTY';
+        const isSpiking    = !isOccupiedNow && forecast === 'OCCUPIED';
+        const isWaste      = isOccupiedNow  && forecast === 'EMPTY';
 
         return { ...node, sensor, pred, isOccupiedNow, forecast, confidence,
-            isSpiking, isWaste, hasFireAlert, hasPowerLeak, alerts };
+            isSpiking, isWaste, hasFireAlert, hasPowerLeak };
     });
 
-    const hasSpike    = spikes.some(s => s.isSpiking);
-    const hasAlert    = spikes.some(s => s.hasFireAlert || s.hasPowerLeak);
-    const hasPred     = spikes.some(s => s.forecast !== null);
+    const hasAlert = spikes.some(s => s.hasFireAlert || s.hasPowerLeak);
+    const hasSpike = spikes.some(s => s.isSpiking);
+    const hasPred  = spikes.some(s => s.forecast !== null);
 
-    const panelBg     = dark ? 'rgba(8,14,26,0.95)' : 'rgba(255,255,255,0.97)';
-    const panelBorder = dark ? '1px solid rgba(30,58,95,0.8)' : '1px solid rgba(226,232,240,1)';
-    const labelColor  = dark ? '#64748b' : '#94a3b8';
-    const textColor   = dark ? '#e2e8f0' : '#0f172a';
+    const bg     = dark ? 'rgba(8,12,22,0.98)' : '#ffffff';
+    const border = dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0';
+    const text   = dark ? '#f1f5f9' : '#0f172a';
+    const muted  = dark ? '#475569' : '#94a3b8';
+    const subtle = dark ? 'rgba(255,255,255,0.04)' : '#f8fafc';
+    const subtleBorder = dark ? 'rgba(255,255,255,0.06)' : '#f1f5f9';
+
+    // Global status badge
+    const statusBadge = hasAlert
+        ? { label:'ALERT ACTIVE',   bg:'rgba(239,68,68,0.1)',    color:'#ef4444', border:'rgba(239,68,68,0.3)'   }
+        : hasSpike
+            ? { label:'SPIKE INCOMING', bg:'rgba(245,158,11,0.1)',   color:'#f59e0b', border:'rgba(245,158,11,0.3)'  }
+            : hasPred
+                ? { label:'ALL CLEAR',      bg:'rgba(16,185,129,0.08)',  color:'#10b981', border:'rgba(16,185,129,0.25)' }
+                : null;
 
     return (
-        <div style={{ background: panelBg, border: panelBorder, borderRadius: 16,
-            padding: '14px 16px', boxShadow:'0 2px 12px rgba(0,0,0,0.08)' }}>
+        <div style={{ background:bg, border, borderRadius:14,
+            boxShadow: hasAlert ? '0 0 0 1px rgba(239,68,68,0.2), 0 2px 16px rgba(0,0,0,0.1)'
+                : hasSpike ? '0 0 0 1px rgba(245,158,11,0.15), 0 2px 16px rgba(0,0,0,0.08)'
+                    : '0 1px 8px rgba(0,0,0,0.07)' }}>
 
-            {/* Header row */}
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 10 }}>
-                <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
-                    <span style={{ fontSize: 14 }}>🔮</span>
-                    <div>
-                        <p style={{ fontSize: 11, fontWeight: 700, color: textColor, margin: 0 }}>
-                            30-Min Occupancy Forecast
-                        </p>
-                        <p style={{ fontSize: 9, color: labelColor, margin: 0, letterSpacing:'0.05em' }}>
-                            {hasPred
-                                ? `inference.py · updated ${lastUpdate ? lastUpdate.toLocaleTimeString() : '—'}`
-                                : 'Run inference.py to see live predictions'}
-                        </p>
-                    </div>
+            {/* Header */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'12px 16px', borderBottom:`1px solid ${subtleBorder}` }}>
+                <div>
+                    <p style={{ fontSize:11, fontWeight:700, color:text, margin:0, letterSpacing:'0.03em' }}>
+                        30-MIN OCCUPANCY FORECAST
+                    </p>
+                    <p style={{ fontSize:9, color:muted, margin:'2px 0 0', letterSpacing:'0.04em' }}>
+                        {hasPred
+                            ? `AI model · inference.py · last updated ${lastUpdate?.toLocaleTimeString() ?? '—'}`
+                            : 'Start inference.py on your laptop to see live predictions'}
+                    </p>
                 </div>
-                {hasAlert && (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding:'3px 8px', borderRadius: 20,
-                        background:'rgba(239,68,68,0.12)', color:'#ef4444',
-                        border:'1px solid rgba(239,68,68,0.3)', letterSpacing:'0.08em' }}>
-            ⚠ ALERT ACTIVE
-          </span>
-                )}
-                {!hasAlert && hasSpike && (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding:'3px 8px', borderRadius: 20,
-                        background:'rgba(245,158,11,0.12)', color:'#f59e0b',
-                        border:'1px solid rgba(245,158,11,0.3)', letterSpacing:'0.08em' }}>
-            SPIKE INCOMING
-          </span>
-                )}
-                {!hasAlert && !hasSpike && hasPred && (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding:'3px 8px', borderRadius: 20,
-                        background:'rgba(16,185,129,0.1)', color:'#10b981',
-                        border:'1px solid rgba(16,185,129,0.25)', letterSpacing:'0.08em' }}>
-            ALL NORMAL
+                {statusBadge && (
+                    <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.1em',
+                        padding:'4px 10px', borderRadius:6,
+                        background: statusBadge.bg, color: statusBadge.color,
+                        border:`1px solid ${statusBadge.border}` }}>
+            {statusBadge.label}
           </span>
                 )}
             </div>
 
             {/* Node rows */}
-            <div style={{ display:'flex', flexDirection:'column', gap: 6 }}>
-                {spikes.map(node => {
-                    const conf    = node.confidence != null ? Math.round(node.confidence * 100) : null;
-                    const rowBg   = node.hasFireAlert  ? 'rgba(239,68,68,0.08)'
-                        : node.hasPowerLeak ? 'rgba(245,158,11,0.08)'
-                            : node.isSpiking    ? 'rgba(59,130,246,0.08)'
-                                : 'transparent';
-                    const rowBorder = node.hasFireAlert  ? '1px solid rgba(239,68,68,0.25)'
-                        : node.hasPowerLeak ? '1px solid rgba(245,158,11,0.2)'
-                            : node.isSpiking    ? '1px solid rgba(59,130,246,0.2)'
-                                : `1px solid ${dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'}`;
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)',
+                gap:0, padding:'0' }}>
+                {spikes.map((node, i) => {
+                    const conf  = node.confidence != null ? Math.round(node.confidence * 100) : null;
+                    const isLast = i === spikes.length - 1;
 
-                    const forecastColor = node.hasFireAlert ? '#ef4444'
-                        : node.isSpiking   ? '#f59e0b'
-                            : node.forecast === 'OCCUPIED' ? '#10b981'
-                                : node.forecast === 'EMPTY'    ? '#64748b'
-                                    : '#334155';
+                    // Row accent
+                    const rowAccent = node.hasFireAlert ? '#ef4444'
+                        : node.hasPowerLeak ? '#f59e0b'
+                            : node.isSpiking    ? '#f59e0b'
+                                : node.isWaste      ? '#64748b'
+                                    : node.forecast === 'OCCUPIED' ? '#10b981'
+                                        : '#475569';
 
-                    const forecastLabel = node.hasFireAlert  ? '⚠ FIRE ALERT'
-                        : node.hasPowerLeak ? '⚡ POWER LEAK'
-                            : node.isSpiking    ? '↑ Spike in 30min'
-                                : node.isWaste      ? '↓ Will Empty Soon'
-                                    : node.forecast === 'OCCUPIED' ? '✓ Stays Occupied'
-                                        : node.forecast === 'EMPTY'    ? '○ Will Stay Empty'
-                                            : '— Awaiting data';
+                    const statusText = node.hasFireAlert  ? 'FIRE ALERT'
+                        : node.hasPowerLeak ? 'POWER LEAK'
+                            : node.isSpiking    ? 'SPIKE IN 30 MIN'
+                                : node.isWaste      ? 'WILL EMPTY SOON'
+                                    : node.forecast === 'OCCUPIED' ? 'STAYS OCCUPIED'
+                                        : node.forecast === 'EMPTY'    ? 'STAYS EMPTY'
+                                            : 'NO DATA YET';
+
+                    const nowLabel = node.dashId === 'Classroom_1'
+                        ? (node.isOccupiedNow ? 'MOTION' : 'CLEAR')
+                        : node.dashId === 'Classroom_2'
+                            ? (node.sensor.lux != null ? `${node.sensor.lux} LX` : '— LX')
+                            : (node.sensor.temperature_c != null ? `${node.sensor.temperature_c.toFixed(1)}C` : '—');
+
+                    const rowBg = node.hasFireAlert ? (dark ? 'rgba(239,68,68,0.07)' : 'rgba(239,68,68,0.04)')
+                        : node.isSpiking  ? (dark ? 'rgba(245,158,11,0.06)' : 'rgba(245,158,11,0.03)')
+                            : 'transparent';
 
                     return (
                         <div key={node.dashId}
-                             style={{ display:'flex', alignItems:'center', gap: 10, padding:'7px 10px',
-                                 borderRadius: 10, background: rowBg, border: rowBorder }}>
-                            {/* Color bar */}
-                            <div style={{ width: 3, height: 28, borderRadius: 2, background: node.color, flexShrink: 0 }} />
+                             style={{ padding:'14px 16px', background: rowBg,
+                                 borderRight: !isLast ? `1px solid ${subtleBorder}` : 'none' }}>
 
-                            {/* Room name + current */}
-                            <div style={{ minWidth: 90 }}>
-                                <p style={{ fontSize: 11, fontWeight: 700, color: textColor, margin: 0 }}>{node.label}</p>
-                                <p style={{ fontSize: 9, color: labelColor, margin: 0, fontFamily:"'DM Mono',monospace" }}>
-                                    {node.dashId === 'Classroom_1'
-                                        ? (node.isOccupiedNow ? '● Motion' : '○ Clear')
-                                        : node.dashId === 'Classroom_2'
-                                            ? (node.sensor.lux != null ? `${node.sensor.lux} lx` : '— lx')
-                                            : (node.sensor.temperature_c != null ? `${node.sensor.temperature_c.toFixed(1)}°C` : '—')}
-                                </p>
-                            </div>
-
-                            {/* Now → arrow → 30min */}
-                            <div style={{ display:'flex', alignItems:'center', gap: 6, flex: 1 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, fontFamily:"'DM Mono',monospace",
-                    padding:'2px 7px', borderRadius: 6,
-                    background: node.isOccupiedNow ? 'rgba(16,185,129,0.12)' : 'rgba(100,116,139,0.1)',
-                    color: node.isOccupiedNow ? '#10b981' : '#64748b',
-                    border: `1px solid ${node.isOccupiedNow ? 'rgba(16,185,129,0.3)' : 'rgba(100,116,139,0.15)'}` }}>
-                  {node.isOccupiedNow ? 'OCC' : 'EMPTY'}
-                </span>
-                                <span style={{ fontSize: 9, color: labelColor }}>→ +30m →</span>
-                                <span style={{ fontSize: 10, fontWeight: 700, color: forecastColor,
-                                    fontFamily:"'DM Mono',monospace" }}>
-                  {forecastLabel}
-                </span>
-                            </div>
-
-                            {/* Confidence */}
-                            {conf != null && (
-                                <div style={{ textAlign:'right', flexShrink: 0 }}>
-                                    <p style={{ fontSize: 9, color: labelColor, margin: 0 }}>confidence</p>
-                                    <p style={{ fontSize: 11, fontWeight: 700, margin: 0, fontFamily:"'DM Mono',monospace",
-                                        color: conf > 80 ? '#10b981' : '#f59e0b' }}>{conf}%</p>
+                            {/* Room label + node */}
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+                                    <div style={{ width:3, height:16, borderRadius:2,
+                                        background: node.color, flexShrink:0 }} />
+                                    <p style={{ fontSize:12, fontWeight:700, color:text, margin:0 }}>
+                                        {node.label}
+                                    </p>
                                 </div>
+                                <span style={{ fontSize:8, fontWeight:700, color:muted, letterSpacing:'0.08em',
+                                    fontFamily:"'DM Mono',monospace" }}>
+                  NODE {node.node}
+                </span>
+                            </div>
+
+                            {/* Now → forecast */}
+                            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                                {/* Now */}
+                                <div style={{ flex:1, background:subtle, border:`1px solid ${subtleBorder}`,
+                                    borderRadius:6, padding:'6px 8px' }}>
+                                    <p style={{ fontSize:8, color:muted, margin:'0 0 2px', letterSpacing:'0.08em' }}>NOW</p>
+                                    <p style={{ fontSize:11, fontWeight:700, margin:0,
+                                        fontFamily:"'DM Mono',monospace",
+                                        color: node.isOccupiedNow ? '#10b981' : muted }}>
+                                        {nowLabel}
+                                    </p>
+                                </div>
+
+                                {/* Arrow */}
+                                <div style={{ fontSize:10, color:muted, flexShrink:0 }}>+30m</div>
+
+                                {/* Forecast */}
+                                <div style={{ flex:1, background:subtle, border:`1px solid ${subtleBorder}`,
+                                    borderRadius:6, padding:'6px 8px',
+                                    borderColor: node.isSpiking || node.hasFireAlert
+                                        ? rowAccent + '66' : subtleBorder }}>
+                                    <p style={{ fontSize:8, color:muted, margin:'0 0 2px', letterSpacing:'0.08em' }}>FORECAST</p>
+                                    <p style={{ fontSize:11, fontWeight:700, margin:0,
+                                        fontFamily:"'DM Mono',monospace",
+                                        color: rowAccent }}>
+                                        {statusText}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Confidence bar */}
+                            {conf != null ? (
+                                <div>
+                                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+                                        <span style={{ fontSize:8, color:muted, letterSpacing:'0.06em' }}>CONFIDENCE</span>
+                                        <span style={{ fontSize:9, fontWeight:700, fontFamily:"'DM Mono',monospace",
+                                            color: conf > 80 ? '#10b981' : '#f59e0b' }}>{conf}%</span>
+                                    </div>
+                                    <div style={{ height:3, borderRadius:2,
+                                        background: dark ? 'rgba(255,255,255,0.06)' : '#f1f5f9' }}>
+                                        <div style={{ height:'100%', borderRadius:2,
+                                            width:`${conf}%`,
+                                            background: conf > 80 ? '#10b981' : '#f59e0b',
+                                            transition:'width 0.5s' }} />
+                                    </div>
+                                </div>
+                            ) : (
+                                <p style={{ fontSize:9, color:muted, margin:0, fontStyle:'italic' }}>
+                                    Awaiting inference.py
+                                </p>
                             )}
                         </div>
                     );
                 })}
             </div>
-
-            {/* Footer hint */}
-            {!hasPred && (
-                <p style={{ fontSize: 9, color: labelColor, marginTop: 8, textAlign:'center', letterSpacing:'0.05em' }}>
-                    Start inference.py on your laptop · or use Simulation tab to inject test data
-                </p>
-            )}
         </div>
     );
 }
+
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
@@ -544,6 +687,9 @@ export default function Dashboard() {
                             </div>
                         )}
 
+                        {/* ── Occupancy Spike Prediction — top of dashboard ───────────── */}
+                        <OccupancySpikePanel sensorState={sensorState} dark={dark} />
+
                         {/* ── Main content: node cards | 3D model | energy ────────────── */}
                         <div className="flex flex-1 gap-4 min-h-0" style={{ minHeight: 460 }}>
 
@@ -593,7 +739,7 @@ export default function Dashboard() {
 
                             {/* Right — energy summary + total occupancy */}
                             <div className="flex flex-col gap-3 shrink-0" style={{ width: 220 }}>
-                                <EnergySummary kpi={KPI} dark={dark} />
+                                <EnergySummary kpi={KPI} sensorState={sensorState} dark={dark} />
 
                                 {/* Total occupancy */}
                                 <div className="rounded-2xl p-4"
@@ -632,9 +778,6 @@ export default function Dashboard() {
                                 </button>
                             </div>
                         </div>
-
-                        {/* ── Occupancy Spike Prediction ───────────────────────────────── */}
-                        <OccupancySpikePanel sensorState={sensorState} dark={dark} />
 
                         {/* ── Bottom action row ────────────────────────────────────────── */}
                         <div className="flex items-center gap-3">

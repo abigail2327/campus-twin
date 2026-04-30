@@ -74,9 +74,10 @@ const SENSOR_FILTER_CFG = [
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 function getRoomColor(room, sensor, selected, hovered) {
-    if (selected)           return new THREE.Color('#2563eb');
-    if (hovered)            return new THREE.Color('#3b82f6');
-    if (sensor?.fire_alert) return new THREE.Color('#ef4444');
+    if (selected)                return new THREE.Color('#2563eb');
+    if (hovered)                 return new THREE.Color('#3b82f6');
+    if (sensor?.status === 'offline') return new THREE.Color('#1e293b'); // node not transmitting
+    if (sensor?.fire_alert)      return new THREE.Color('#ef4444');
     switch (sensor?.status) {
         case 'critical': return new THREE.Color('#dc2626');
         case 'warning':  return new THREE.Color('#d97706');
@@ -250,7 +251,7 @@ function RoomMesh({ room, sensor, selected, onSelect, sensorFilter = 'all' }) {
                 <NodeBadge
                     position={[room.x + room.w*0.35, roomY + FLOOR_H*0.42, room.z - room.d*0.35]}
                     nodeNum={room.node}
-                    color={isFireAlert ? '#ef4444' : isCritical ? '#dc2626' : '#2563eb'} />
+                    color={sensor?.status === 'offline' ? '#334155' : isFireAlert ? '#ef4444' : isCritical ? '#dc2626' : '#2563eb'} />
             )}
 
             {/* Sensor overlay chips */}
@@ -373,6 +374,35 @@ function Scene({ sensorState, selectedRoom, onRoomSelect, sensorFilter }) {
 // ── Sensor detail panel ───────────────────────────────────────────────────────
 function SensorPanel({ room, sensor, onClose }) {
     if (!room || !sensor) return null;
+
+    // Node offline — LoRa uplink not received yet
+    if (sensor.status === 'offline') {
+        return (
+            <div className="absolute bottom-4 left-4 z-10 w-64 rounded-xl border border-slate-700 overflow-hidden"
+                 style={{ background:'rgba(8,13,20,0.97)', boxShadow:'0 8px 32px rgba(0,0,0,0.5)' }}>
+                <div className="px-4 py-3 border-b border-slate-700/60 flex items-center justify-between"
+                     style={{ background:'rgba(15,23,42,0.8)' }}>
+                    <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-slate-600" />
+                        <h3 className="text-sm font-bold text-white">{room.label.replace('\n',' ')}</h3>
+                    </div>
+                    <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-sm">✕</button>
+                </div>
+                <div className="px-4 py-4 text-center">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Node Offline</p>
+                    <p className="text-[11px] text-slate-600">
+                        No LoRa uplink received yet.{'\n'}
+                        Check Arduino node {room.node} is powered and joined TTN.
+                    </p>
+                    {room.node && (
+                        <p className="text-[10px] text-blue-500 mt-2 font-mono">
+                            Expected: twinergy/rooms/{room.id === 'Large_Lecture_Hall' ? 'lecture-hall' : room.id === 'Classroom_1' ? 'classroom-1' : 'classroom-2'}/environment
+                        </p>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     const rows = [];
     if (room.id === 'Classroom_1') {
@@ -568,6 +598,7 @@ function Legend() {
                 ['#dc2626','Critical'],
                 ['#ef4444','Fire Alert'],
                 ['#2563eb','Selected'],
+                ['#334155','Node Offline'],
             ].map(([color, label]) => (
                 <div key={label} className="flex items-center gap-2 mb-1.5 last:mb-0">
                     <span className="w-3 h-3 rounded-sm" style={{ background:color, boxShadow:`0 0 4px ${color}80` }} />
