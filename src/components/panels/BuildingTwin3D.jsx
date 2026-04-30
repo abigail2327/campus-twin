@@ -1,23 +1,24 @@
 /**
- * BuildingTwin3D.jsx — Improved Visual Design
+ * BuildingTwin3D.jsx
  * ─────────────────────────────────────────────────────────────────────────────
- * Improvements:
- *   - Holographic grid floor with animated scan line
- *   - Glowing room edges (wireframe overlay)
- *   - Richer material — glass-like transparent rooms with coloured glow
- *   - Floating sensor value labels above active rooms
- *   - Gradient sky background (deep navy → black)
- *   - Subtle ambient particles
- *   - Cleaner UI overlays — dark glass panels
- *   - Fire alert: flashing red room + pulsing ring
+ * Interactive 3D Digital Twin — RIT Dubai mini-campus building.
+ * Restored to original clean version with:
+ *   - Teal/blue room colours, proper opacity
+ *   - Floor labels + building outline
+ *   - Spinning fan + damper blade in Mechanical Room
+ *   - Sensor overlays (lights, motion, fire)
+ *   - Full threshold panel on sensor filter
+ *   - SensorPanel on room click
+ *
+ * Data: reads live from Firebase via sensorState prop (twinergy/rooms/*)
+ * No simulation writes — live uplink only.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { useRef, useState, useEffect, useMemo, Suspense } from 'react';
+import { useRef, useState, useEffect, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Text, Html, Line } from '@react-three/drei';
+import { OrbitControls, Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import Icon from './Icon';
 import { MOCK_SENSOR_STATE } from '../../services/sensorState';
 
 // Suppress Three.js deprecation warnings
@@ -25,26 +26,29 @@ if (typeof window !== 'undefined') {
     const _warn = console.warn.bind(console);
     console.warn = (...args) => {
         const msg = args[0] ?? '';
-        if (typeof msg === 'string' && (msg.includes('THREE.THREE.Clock') || msg.includes('PCFSoftShadowMap'))) return;
+        if (typeof msg === 'string' && (
+            msg.includes('THREE.THREE.Clock') ||
+            msg.includes('PCFSoftShadowMap')
+        )) return;
         _warn(...args);
     };
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 const FLOOR_H = 3.2;
 const WALL_T  = 0.08;
 const CEIL_H  = 0.06;
 
 const ROOMS = [
-    { id:'Lobby_Reception',    label:'Lobby',              node:null, floor:1, x:1.50, z:2.00, w:3.00, d:4.00 },
-    { id:'Classroom_1',        label:'Classroom A',        node:1,    floor:1, x:4.50, z:2.00, w:3.00, d:4.00 },
-    { id:'Classroom_2',        label:'Classroom B',        node:2,    floor:1, x:7.65, z:2.00, w:4.30, d:4.00 },
-    { id:'Large_Lecture_Hall', label:'Lecture Hall',       node:3,    floor:1, x:2.15, z:7.05, w:4.30, d:6.10 },
-    { id:'Lounge_Study',       label:'Lounge',             node:null, floor:2, x:1.50, z:2.00, w:3.00, d:4.00 },
-    { id:'Computer_Lab',       label:'Computer Lab',       node:5,    floor:2, x:6.65, z:2.00, w:7.30, d:4.00 },
-    { id:'Faculty_Office',     label:'Faculty Office',     node:4,    floor:2, x:2.15, z:5.00, w:4.30, d:2.00 },
-    { id:'Control_Room',       label:'Control Room',       node:null, floor:2, x:2.15, z:7.00, w:4.30, d:2.00 },
-    { id:'Mechanical_Room',    label:'Mechanical Room',    node:6,    floor:2, x:2.15, z:9.00, w:4.30, d:2.00 },
+    { id:'Lobby_Reception',    label:'Lobby /\nReception',   node:null, floor:1, x:1.50, z:2.00, w:3.00, d:4.00 },
+    { id:'Classroom_1',        label:'Classroom A',          node:1,    floor:1, x:4.50, z:2.00, w:3.00, d:4.00 },
+    { id:'Classroom_2',        label:'Classroom B',          node:2,    floor:1, x:7.65, z:2.00, w:4.30, d:4.00 },
+    { id:'Large_Lecture_Hall', label:'Large\nLecture Hall',  node:3,    floor:1, x:2.15, z:7.05, w:4.30, d:6.10 },
+    { id:'Lounge_Study',       label:'Lounge /\nStudy Area', node:null, floor:2, x:1.50, z:2.00, w:3.00, d:4.00 },
+    { id:'Computer_Lab',       label:'Computer Lab',         node:5,    floor:2, x:6.65, z:2.00, w:7.30, d:4.00 },
+    { id:'Faculty_Office',     label:'Faculty\nOffice',      node:4,    floor:2, x:2.15, z:5.00, w:4.30, d:2.00 },
+    { id:'Control_Room',       label:'Control\nRoom',        node:null, floor:2, x:2.15, z:7.00, w:4.30, d:2.00 },
+    { id:'Mechanical_Room',    label:'Mechanical\nRoom',     node:6,    floor:2, x:2.15, z:9.00, w:4.30, d:2.00 },
 ];
 
 const ROOM_SENSORS = {
@@ -60,271 +64,104 @@ const ROOM_SENSORS = {
 };
 
 const SENSOR_FILTER_CFG = [
-    { id:'all',         label:'All Rooms',   color:'#60a5fa' },
-    { id:'motion',      label:'Motion',      color:'#34d399' },
-    { id:'temperature', label:'Temperature', color:'#f87171' },
+    { id:'all',         label:'All',         color:'#2563eb' },
+    { id:'motion',      label:'Motion',      color:'#3b82f6' },
+    { id:'temperature', label:'Temperature', color:'#ef4444' },
     { id:'lux',         label:'Lux',         color:'#fbbf24' },
     { id:'fire',        label:'Fire',        color:'#ef4444' },
-    { id:'power',       label:'Power',       color:'#a78bfa' },
+    { id:'power',       label:'Power',       color:'#8b5cf6' },
 ];
 
-// ── Color system ───────────────────────────────────────────────────────────────
-const ROOM_COLORS = {
-    normal:   { fill:'#0f4c5c', edge:'#0ea5e9', glow:'#38bdf8' },
-    warning:  { fill:'#78350f', edge:'#f59e0b', glow:'#fbbf24' },
-    critical: { fill:'#7f1d1d', edge:'#ef4444', glow:'#fca5a5' },
-    fire:     { fill:'#450a0a', edge:'#ef4444', glow:'#ef4444' },
-    selected: { fill:'#1e3a8a', edge:'#60a5fa', glow:'#93c5fd' },
-    hovered:  { fill:'#0f2d5c', edge:'#7dd3fc', glow:'#7dd3fc' },
-    dim:      { fill:'#080d14', edge:'#0f172a', glow:'#0f172a' },
-};
-
-function getRoomScheme(room, sensor, selected, hovered, filterMatch, sensorFilter) {
-    if (sensor?.fire_alert)          return ROOM_COLORS.fire;
-    if (selected)                    return ROOM_COLORS.selected;
-    if (hovered)                     return ROOM_COLORS.hovered;
-    if (sensorFilter !== 'all' && !filterMatch) return ROOM_COLORS.dim;
+// ── Color helpers ─────────────────────────────────────────────────────────────
+function getRoomColor(room, sensor, selected, hovered) {
+    if (selected)           return new THREE.Color('#2563eb');
+    if (hovered)            return new THREE.Color('#3b82f6');
+    if (sensor?.fire_alert) return new THREE.Color('#ef4444');
     switch (sensor?.status) {
-        case 'critical': return ROOM_COLORS.critical;
-        case 'warning':  return ROOM_COLORS.warning;
-        default:         return ROOM_COLORS.normal;
+        case 'critical': return new THREE.Color('#dc2626');
+        case 'warning':  return new THREE.Color('#d97706');
+        default:         return new THREE.Color('#0f766e');
     }
 }
 
-// ── Holographic grid floor ─────────────────────────────────────────────────────
-function HoloGrid() {
-    // Sparse grid — 1.6m spacing, very subtle
-    const lines = [];
-    for (let i = 0; i <= 10; i++) {
-        const v = i * 1.6;
-        lines.push(<Line key={`x${i}`} points={[[v,0,0],[v,0,16]]} color="#0c4a6e" lineWidth={0.5} transparent opacity={0.4} />);
-        lines.push(<Line key={`z${i}`} points={[[0,0,v],[16,0,v]]} color="#0c4a6e" lineWidth={0.5} transparent opacity={0.4} />);
-    }
-    return (
-        <group position={[0, -0.01, 0]}>
-            {lines}
-            <ScanLine />
-            <mesh rotation={[-Math.PI/2, 0, 0]} position={[8, 0, 8]}>
-                <planeGeometry args={[16, 16]} />
-                <meshBasicMaterial color="#060d1a" transparent opacity={0.85} side={THREE.DoubleSide} />
-            </mesh>
-        </group>
-    );
-}
-
-function ScanLine() {
-    const ref = useRef();
-    useFrame(({ clock }) => {
-        if (ref.current) {
-            ref.current.position.z = ((clock.getElapsedTime() * 1.2) % 16);
-            ref.current.material.opacity = 0.12 + Math.sin(clock.getElapsedTime() * 2) * 0.05;
-        }
-    });
-    return (
-        <mesh ref={ref} rotation={[-Math.PI/2, 0, 0]} position={[8, 0.02, 0]}>
-            <planeGeometry args={[16, 0.06]} />
-            <meshBasicMaterial color="#0ea5e9" transparent opacity={0.15} side={THREE.DoubleSide} />
-        </mesh>
-    );
-}
-
-// ── Room mesh with glowing wireframe overlay ───────────────────────────────────
-function RoomMesh({ room, sensor, selected, onSelect, sensorFilter = 'all' }) {
-    const fillRef  = useRef();
-    const edgeRef  = useRef();
-    const glowRef  = useRef();
-    const [hovered, setHovered] = useState(false);
-    const floorY    = (room.floor - 1) * FLOOR_H;
-    const roomY     = floorY + FLOOR_H / 2;
-    const isFireAlert = sensor?.fire_alert;
-    const filterMatch = sensorFilter === 'all' || (ROOM_SENSORS[room.id] ?? []).includes(sensorFilter);
-
-    // Room dimensions
-    const rw = room.w - WALL_T;
-    const rh = FLOOR_H - CEIL_H;
-    const rd = room.d - WALL_T;
-
-    const scheme = getRoomScheme(room, sensor, selected, hovered, filterMatch, sensorFilter);
-
-    useFrame(({ clock }) => {
-        const t = clock.getElapsedTime();
-
-        if (fillRef.current) {
-            if (isFireAlert) {
-                const flash = Math.sin(t * 10) > 0;
-                fillRef.current.material.color.set(flash ? '#7f1d1d' : '#450a0a');
-                fillRef.current.material.emissive.set(flash ? '#ef4444' : '#000');
-                fillRef.current.material.emissiveIntensity = flash ? 0.5 : 0;
-                fillRef.current.material.opacity = 0.7;
-            } else {
-                fillRef.current.material.color.set(scheme.fill);
-                fillRef.current.material.emissive.set(selected ? scheme.glow : '#000');
-                fillRef.current.material.emissiveIntensity = selected ? 0.12 : 0;
-                fillRef.current.material.opacity = sensorFilter !== 'all' && !filterMatch ? 0.04
-                    : selected ? 0.65 : hovered ? 0.5 : 0.22;
-            }
-        }
-        if (edgeRef.current) {
-            edgeRef.current.material.color.set(isFireAlert
-                ? (Math.sin(t * 8) > 0 ? '#ef4444' : '#7f1d1d')
-                : scheme.edge);
-            edgeRef.current.material.opacity = sensorFilter !== 'all' && !filterMatch ? 0.04
-                : selected ? 0.95 : hovered ? 0.8 : filterMatch ? 0.4 + Math.sin(t * 1.5 + room.x) * 0.06 : 0.08;
-        }
-        if (glowRef.current) {
-            const pulse = 0.5 + Math.sin(t * 2 + room.x) * 0.3;
-            glowRef.current.material.opacity = (isFireAlert ? 0.2 + Math.sin(t * 8) * 0.15
-                : selected ? 0.12 : filterMatch ? 0.04 * pulse : 0.005);
-            glowRef.current.material.color.set(scheme.glow);
-        }
-    });
-
-    return (
-        <group visible={true}>
-            {/* Glow fill — slightly larger, rendered first */}
-            <mesh ref={glowRef} position={[room.x, roomY, room.z]}>
-                <boxGeometry args={[rw + 0.1, rh + 0.1, rd + 0.1]} />
-                <meshBasicMaterial color={scheme.glow} transparent opacity={0.06} side={THREE.BackSide} />
-            </mesh>
-
-            {/* Main room fill — glass-like */}
-            <mesh ref={fillRef} position={[room.x, roomY, room.z]}
-                  onClick={e => { e.stopPropagation(); onSelect(room.id); }}
-                  onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor='pointer'; }}
-                  onPointerOut={e => { e.stopPropagation(); setHovered(false); document.body.style.cursor='auto'; }}>
-                <boxGeometry args={[rw, rh, rd]} />
-                <meshStandardMaterial transparent opacity={0.32} metalness={0.4} roughness={0.1}
-                                      color={scheme.fill} side={THREE.DoubleSide} envMapIntensity={0.5}
-                                      depthWrite={false} />
-            </mesh>
-
-            {/* Wireframe edge overlay — the glow lines */}
-            <mesh ref={edgeRef} position={[room.x, roomY, room.z]}>
-                <boxGeometry args={[rw, rh, rd]} />
-                <meshBasicMaterial color={scheme.edge} transparent opacity={0.55}
-                                   wireframe side={THREE.FrontSide} depthWrite={false} />
-            </mesh>
-
-            {/* Floor tile */}
-            <mesh position={[room.x, floorY + 0.02, room.z]}>
-                <boxGeometry args={[rw, 0.04, rd]} />
-                <meshStandardMaterial color={scheme.fill} transparent opacity={0.5} metalness={0.6} roughness={0.2} />
-            </mesh>
-
-            {/* Ceiling — lit when lights on */}
-            <mesh position={[room.x, floorY + FLOOR_H - 0.05, room.z]}>
-                <boxGeometry args={[rw - 0.1, 0.04, rd - 0.1]} />
-                <meshStandardMaterial
-                    color={sensor?.lights ? '#fef9c3' : '#0f172a'}
-                    emissive={sensor?.lights ? '#fef9c3' : '#000'}
-                    emissiveIntensity={sensor?.lights ? 0.8 : 0}
-                    transparent opacity={sensor?.lights ? 0.9 : 0.4} />
-            </mesh>
-            {sensor?.lights && (
-                <pointLight position={[room.x, floorY + FLOOR_H - 0.4, room.z]}
-                            color="#fff9e6" intensity={1.2} distance={room.w * 2} decay={2} />
-            )}
-
-            {/* Room label */}
-            <Text position={[room.x, roomY, room.z]} fontSize={0.2}
-                  color={selected ? '#ffffff' : filterMatch ? '#e2e8f0' : '#334155'}
-                  anchorX="center" anchorY="middle" textAlign="center"
-                  maxWidth={room.w * 0.8} outlineWidth={0.015} outlineColor="#0f172a">
-                {room.label}
-            </Text>
-
-            {/* Floating sensor reading above selected room */}
-            {selected && sensor && (
-                <Html position={[room.x, floorY + FLOOR_H + 0.6, room.z]} center distanceFactor={6}>
-                    <div style={{
-                        background:'rgba(6,10,20,0.92)', border:'1px solid rgba(96,165,250,0.3)',
-                        borderRadius:'6px', padding:'5px 9px', pointerEvents:'none',
-                        fontFamily:"'DM Mono',monospace", fontSize:'10px', color:'#93c5fd',
-                        boxShadow:'0 2px 12px rgba(0,0,0,0.6)', whiteSpace:'nowrap',
-                        letterSpacing:'0.05em',
-                    }}>
-                        {room.id === 'Classroom_1' && (
-                            <span style={{ color: sensor.motion ? '#34d399' : '#64748b' }}>
-                {sensor.motion ? '● MOTION' : '○ CLEAR'}
-              </span>
-                        )}
-                        {room.id === 'Classroom_2' && sensor.lux != null && (
-                            <span style={{ color:'#fbbf24' }}>{sensor.lux} lx</span>
-                        )}
-                        {room.id === 'Large_Lecture_Hall' && sensor.temperature_c != null && (
-                            <span style={{ color: sensor.fire_alert ? '#ef4444' : sensor.temperature_c > 28 ? '#f87171' : '#34d399' }}>
-                {sensor.fire_alert ? '⚠ FIRE' : `${sensor.temperature_c.toFixed(1)}°C`}
-              </span>
-                        )}
-                        {!['Classroom_1','Classroom_2','Large_Lecture_Hall'].includes(room.id) && (
-                            <span style={{ color:'#64748b' }}>{room.label}</span>
-                        )}
-                    </div>
-                </Html>
-            )}
-
-            {/* Node badge */}
-            {room.node && (
-                <Html position={[room.x + room.w*0.35, roomY + FLOOR_H*0.4, room.z - room.d*0.35]}
-                      center distanceFactor={9}>
-                    <div style={{
-                        background:'rgba(6,10,20,0.88)',
-                        border:`1px solid ${isFireAlert ? 'rgba(239,68,68,0.6)' : 'rgba(96,165,250,0.35)'}`,
-                        color: isFireAlert ? '#fca5a5' : '#7dd3fc',
-                        fontSize:'8px', fontWeight:700, fontFamily:"'DM Mono',monospace",
-                        padding:'2px 6px', borderRadius:'3px', whiteSpace:'nowrap',
-                        pointerEvents:'none', letterSpacing:'0.08em',
-                    }}>
-                        N{room.node}
-                    </div>
-                </Html>
-            )}
-
-            {/* Sensor overlay chips */}
-            <SensorOverlay position={[room.x - room.w*0.28, roomY + FLOOR_H*0.3, room.z + room.d*0.35]} sensor={sensor} />
-
-            {/* Pulse rings */}
-            {isFireAlert && <PulseRing position={[room.x, floorY + FLOOR_H + 0.05, room.z]} color="#ef4444" scale={1.2} />}
-            {selected && !isFireAlert && <PulseRing position={[room.x, floorY + FLOOR_H + 0.05, room.z]} color="#3b82f6" scale={0.9} />}
-        </group>
-    );
-}
-
-// ── Pulse ring ─────────────────────────────────────────────────────────────────
-function PulseRing({ position, color = '#3b82f6', scale = 1 }) {
+// ── Animated components ───────────────────────────────────────────────────────
+function PulseRing({ position, color = '#ef4444' }) {
     const ref = useRef();
     useFrame(({ clock }) => {
         if (!ref.current) return;
-        const s = scale * (1 + Math.sin(clock.getElapsedTime() * 4) * 0.25);
+        const s = 1 + Math.sin(clock.getElapsedTime() * 4) * 0.3;
         ref.current.scale.set(s, s, s);
-        ref.current.material.opacity = 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.25;
+        ref.current.material.opacity = 0.4 + Math.sin(clock.getElapsedTime() * 4) * 0.3;
     });
     return (
         <mesh ref={ref} position={position}>
-            <ringGeometry args={[0.35, 0.5, 32]} />
+            <ringGeometry args={[0.4, 0.55, 32]} />
             <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
         </mesh>
     );
 }
 
-// ── Overlays ───────────────────────────────────────────────────────────────────
+function SpinningFan({ position, speed = 1, active = true }) {
+    const ref = useRef();
+    useFrame((_, delta) => { if (ref.current && active) ref.current.rotation.z += delta * speed * 3; });
+    return (
+        <group position={position} ref={ref}>
+            {[0, 90, 180, 270].map(angle => (
+                <mesh key={angle} rotation={[0, 0, (angle * Math.PI) / 180]}>
+                    <boxGeometry args={[0.35, 0.08, 0.04]} />
+                    <meshStandardMaterial color={active ? '#94a3b8' : '#334155'} metalness={0.6} roughness={0.4} />
+                </mesh>
+            ))}
+            <mesh>
+                <cylinderGeometry args={[0.06, 0.06, 0.06, 16]} />
+                <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.2} />
+            </mesh>
+        </group>
+    );
+}
+
+function DamperBlade({ position, angle = 0 }) {
+    return (
+        <mesh position={position} rotation={[(angle * Math.PI) / 180, 0, 0]}>
+            <boxGeometry args={[0.6, 0.04, 0.25]} />
+            <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
+        </mesh>
+    );
+}
+
+// ── Overlays ──────────────────────────────────────────────────────────────────
+function NodeBadge({ position, nodeNum, color }) {
+    return (
+        <Html position={position} center distanceFactor={8}>
+            <div style={{
+                background: color, color: '#fff', fontSize: '9px', fontWeight: 700,
+                fontFamily: 'DM Mono, monospace', padding: '2px 5px', borderRadius: '4px',
+                whiteSpace: 'nowrap', boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                pointerEvents: 'none', letterSpacing: '0.5px',
+            }}>
+                NODE {nodeNum}
+            </div>
+        </Html>
+    );
+}
+
 function SensorOverlay({ position, sensor }) {
     const indicators = [];
-    if (sensor?.lights)     indicators.push({ icon:'💡', color:'#fbbf24', label:'Lights' });
-    if (sensor?.motion)     indicators.push({ icon:'👁', color:'#34d399', label:'Motion' });
-    if (sensor?.fire_alert) indicators.push({ icon:'🔥', color:'#ef4444', label:'FIRE' });
+    if (sensor?.lights)      indicators.push({ label:'Lights ON',   color:'#fbbf24' });
+    if (sensor?.motion)      indicators.push({ label:'Motion',      color:'#60a5fa' });
+    if (sensor?.fire_alert)  indicators.push({ label:'FIRE ALERT',  color:'#ef4444' });
     if (!indicators.length) return null;
     return (
-        <Html position={position} center distanceFactor={11}>
+        <Html position={position} center distanceFactor={10}>
             <div style={{ display:'flex', flexDirection:'column', gap:'2px', pointerEvents:'none' }}>
                 {indicators.map((ind, i) => (
                     <div key={i} style={{
-                        background:'rgba(8,13,28,0.9)', border:`1px solid ${ind.color}55`,
-                        color:ind.color, fontSize:'8px', fontWeight:700, padding:'2px 5px',
-                        borderRadius:'4px', whiteSpace:'nowrap', fontFamily:"'DM Mono',monospace",
-                        boxShadow:`0 0 6px ${ind.color}33`,
+                        background: 'rgba(15,23,42,0.85)', border: `1px solid ${ind.color}`,
+                        color: ind.color, fontSize: '8px', fontWeight: 700,
+                        padding: '2px 4px', borderRadius: '3px', whiteSpace: 'nowrap',
+                        fontFamily: 'DM Mono, monospace',
                     }}>
-                        {ind.icon} {ind.label}
+                        {ind.label}
                     </div>
                 ))}
             </div>
@@ -332,60 +169,192 @@ function SensorOverlay({ position, sensor }) {
     );
 }
 
-// ── Floor slab ─────────────────────────────────────────────────────────────────
-function FloorSlab({ y, w, d, x, z }) {
+// ── Room mesh ─────────────────────────────────────────────────────────────────
+function RoomMesh({ room, sensor, selected, onSelect, sensorFilter = 'all' }) {
+    const meshRef = useRef();
+    const [hovered, setHovered] = useState(false);
+    const floorY      = (room.floor - 1) * FLOOR_H;
+    const roomY       = floorY + FLOOR_H / 2;
+    const isFireAlert = sensor?.fire_alert;
+    const isCritical  = sensor?.status === 'critical' || isFireAlert;
+    const filterMatch = sensorFilter === 'all' || (ROOM_SENSORS[room.id] ?? []).includes(sensorFilter);
+
+    useFrame(({ clock }) => {
+        if (!meshRef.current) return;
+        if (isFireAlert) {
+            const flash = Math.sin(clock.getElapsedTime() * 8) > 0;
+            meshRef.current.material.color.set(flash ? '#ef4444' : '#7f1d1d');
+            meshRef.current.material.emissive.set(flash ? '#ef4444' : '#000');
+            meshRef.current.material.emissiveIntensity = flash ? 0.4 : 0;
+        } else {
+            meshRef.current.material.color.set(getRoomColor(room, sensor, selected, hovered));
+            meshRef.current.material.emissive.set(selected ? '#2563eb' : '#000');
+            meshRef.current.material.emissiveIntensity = selected ? 0.15 : 0;
+        }
+    });
+
     return (
-        <group>
-            <mesh position={[x, y, z]}>
-                <boxGeometry args={[w, 0.08, d]} />
-                <meshStandardMaterial color="#080e1a" roughness={0.8} metalness={0.3} />
+        <group visible={sensorFilter === 'all' || filterMatch}>
+            {/* Main room box */}
+            <mesh ref={meshRef}
+                  position={[room.x, roomY, room.z]}
+                  onClick={e => { e.stopPropagation(); onSelect(room.id); }}
+                  onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+                  onPointerOut={e => { e.stopPropagation(); setHovered(false); document.body.style.cursor = 'auto'; }}>
+                <boxGeometry args={[room.w - WALL_T, FLOOR_H - CEIL_H, room.d - WALL_T]} />
+                <meshStandardMaterial
+                    color={getRoomColor(room, sensor, selected, hovered)}
+                    transparent
+                    opacity={selected ? 0.75 : hovered ? 0.65 : filterMatch ? 0.45 : 0.08}
+                    metalness={0.1} roughness={0.6} side={THREE.DoubleSide} />
             </mesh>
-            <mesh position={[x, y + 0.041, z]}>
-                <boxGeometry args={[w, 0.001, d]} />
-                <meshBasicMaterial color="#0c2a4a" transparent opacity={0.8} />
+
+            {/* Floor tile */}
+            <mesh position={[room.x, floorY + 0.04, room.z]}>
+                <boxGeometry args={[room.w, 0.08, room.d]} />
+                <meshStandardMaterial color="#1e293b" roughness={0.8} metalness={0.2} />
             </mesh>
+
+            {/* Ceiling — lights up when occupied */}
+            <mesh position={[room.x, floorY + FLOOR_H - 0.05, room.z]}>
+                <boxGeometry args={[room.w - WALL_T * 2, CEIL_H, room.d - WALL_T * 2]} />
+                <meshStandardMaterial
+                    color={sensor?.lights ? '#fef9c3' : '#1e293b'}
+                    emissive={sensor?.lights ? '#fef9c3' : '#000'}
+                    emissiveIntensity={sensor?.lights ? 0.6 : 0} />
+            </mesh>
+            {sensor?.lights && (
+                <pointLight position={[room.x, floorY + FLOOR_H - 0.3, room.z]}
+                            color="#fff9e6" intensity={0.8} distance={room.w * 1.5} decay={2} />
+            )}
+
+            {/* Room label */}
+            <Text position={[room.x, roomY + 0.2, room.z]}
+                  fontSize={0.22} color={selected ? '#ffffff' : '#e2e8f0'}
+                  anchorX="center" anchorY="middle" textAlign="center"
+                  maxWidth={room.w * 0.85} outlineWidth={0.01} outlineColor="#0f172a">
+                {room.label}
+            </Text>
+
+            {/* Power reading */}
+            {sensor?.power_w != null && (
+                <Text position={[room.x, roomY - 0.4, room.z]}
+                      fontSize={0.16} color="#94a3b8" anchorX="center" anchorY="middle"
+                      outlineWidth={0.008} outlineColor="#0f172a">
+                    {sensor.power_w >= 1000 ? `${(sensor.power_w/1000).toFixed(1)} kW` : `${sensor.power_w.toFixed(0)} W`}
+                </Text>
+            )}
+
+            {/* Node badge */}
+            {room.node && (
+                <NodeBadge
+                    position={[room.x + room.w*0.35, roomY + FLOOR_H*0.42, room.z - room.d*0.35]}
+                    nodeNum={room.node}
+                    color={isFireAlert ? '#ef4444' : isCritical ? '#dc2626' : '#2563eb'} />
+            )}
+
+            {/* Sensor overlay chips */}
+            <SensorOverlay
+                position={[room.x - room.w*0.3, roomY + FLOOR_H*0.35, room.z + room.d*0.35]}
+                sensor={sensor} />
+
+            {/* Pulse rings */}
+            {isFireAlert && <PulseRing position={[room.x, floorY + FLOOR_H + 0.1, room.z]} color="#ef4444" />}
+            {isCritical && !isFireAlert && <PulseRing position={[room.x, floorY + FLOOR_H + 0.1, room.z]} color="#dc2626" />}
+
+            {/* Mechanical Room — spinning fan */}
+            {room.id === 'Mechanical_Room' && (
+                <group position={[room.x, floorY + FLOOR_H * 0.65, room.z]}>
+                    <SpinningFan position={[0.6, 0, 0]}
+                                 speed={sensor?.fan_speed_pct ? sensor.fan_speed_pct / 100 * 3 : 0}
+                                 active={sensor?.fan_speed_pct > 0} />
+                    <DamperBlade position={[-0.3, 0, 0]} angle={sensor?.damper_angle ?? 90} />
+                </group>
+            )}
+
+            {/* Classroom 1 — PIR indicator dot */}
+            {room.id === 'Classroom_1' && sensor?.motion && (
+                <mesh position={[room.x + 1.0, floorY + FLOOR_H - 0.6, room.z - 1.0]}>
+                    <sphereGeometry args={[0.12, 16, 16]} />
+                    <meshStandardMaterial color="#60a5fa" emissive="#60a5fa" emissiveIntensity={0.8} />
+                </mesh>
+            )}
         </group>
     );
 }
 
-// ── Building outline pillars ───────────────────────────────────────────────────
-function BuildingPillars() {
-    const corners = [
-        [0.3, 0.3], [0.3, 11.3], [9.8, 0.3], [9.8, 4.2],
-        [4.0, 4.2], [4.0, 11.3],
+// ── Structure ─────────────────────────────────────────────────────────────────
+function FloorSlab({ y, w, d, x, z }) {
+    return (
+        <mesh position={[x, y, z]}>
+            <boxGeometry args={[w, 0.12, d]} />
+            <meshStandardMaterial color="#0f172a" roughness={0.9} metalness={0.3} />
+        </mesh>
+    );
+}
+
+function BuildingOutline() {
+    const segs = [
+        { x:4.9,  y:FLOOR_H/2,   z:2.0,  w:10.3, h:FLOOR_H, d:4.0 },
+        { x:2.15, y:FLOOR_H/2,   z:7.05, w:4.3,  h:FLOOR_H, d:6.1 },
+        { x:4.9,  y:FLOOR_H*1.5, z:2.0,  w:10.3, h:FLOOR_H, d:4.0 },
+        { x:2.15, y:FLOOR_H*1.5, z:7.0,  w:4.3,  h:FLOOR_H, d:6.0 },
     ];
     return (
         <>
-            {corners.map(([x, z], i) => (
-                <mesh key={i} position={[x, FLOOR_H, z]}>
-                    <boxGeometry args={[0.08, FLOOR_H * 2, 0.08]} />
-                    <meshStandardMaterial color="#0c3258" emissive="#0ea5e9" emissiveIntensity={0.08}
-                                          transparent opacity={0.6} metalness={0.7} roughness={0.2} />
-                </mesh>
+            {segs.map((s, i) => (
+                <lineSegments key={i} position={[s.x, s.y, s.z]}>
+                    <edgesGeometry args={[new THREE.BoxGeometry(s.w, s.h, s.d)]} />
+                    <lineBasicMaterial color="#334155" />
+                </lineSegments>
             ))}
         </>
     );
 }
 
-// ── Scene ──────────────────────────────────────────────────────────────────────
+function Ground() {
+    return (
+        <>
+            <mesh rotation={[-Math.PI/2, 0, 0]} position={[5.0, -0.01, 5.0]}>
+                <planeGeometry args={[22, 22]} />
+                <meshStandardMaterial color="#0b0f1a" roughness={1} />
+            </mesh>
+            <gridHelper args={[22, 22, '#1e293b', '#1e293b']} position={[5.0, 0, 5.0]} />
+        </>
+    );
+}
+
+function FloorLabel({ floor }) {
+    return (
+        <Text position={[-0.5, (floor-1)*FLOOR_H + FLOOR_H/2, 5.0]}
+              fontSize={0.28} color="#475569" anchorX="right" anchorY="middle"
+              rotation={[0, 0.3, 0]}>
+            {`FLOOR ${floor}`}
+        </Text>
+    );
+}
+
+function CameraRig() {
+    const { camera } = useThree();
+    useEffect(() => { camera.position.set(16, 12, 16); camera.lookAt(5, 3, 5); }, []);
+    return null;
+}
+
+// ── Scene ─────────────────────────────────────────────────────────────────────
 function Scene({ sensorState, selectedRoom, onRoomSelect, sensorFilter }) {
     return (
         <>
-            {/* Lighting */}
-            <ambientLight intensity={0.2} color="#0d1f3c" />
-            <directionalLight position={[14, 20, 10]} intensity={0.5} color="#dbeafe" castShadow shadowMapSize={[1024,1024]} />
-            <directionalLight position={[-6, 10, -4]} intensity={0.15} color="#bfdbfe" />
-            <pointLight position={[5, 10, 5]} intensity={0.3} color="#7dd3fc" distance={22} decay={2} />
-            <hemisphereLight skyColor="#0a1628" groundColor="#030508" intensity={0.6} />
-
-            <HoloGrid />
-
-            <FloorSlab y={FLOOR_H}     x={4.9}  z={2.0}  w={10.3} d={4.0} />
-            <FloorSlab y={FLOOR_H}     x={2.15} z={7.05} w={4.3}  d={6.1} />
-            <FloorSlab y={0}           x={5.0}  z={5.5}  w={10.0} d={12.0} />
-
-            <BuildingPillars />
-
+            <CameraRig />
+            <ambientLight intensity={0.3} color="#e2e8f0" />
+            <directionalLight position={[15, 20, 10]} intensity={0.8} color="#ffffff" castShadow />
+            <directionalLight position={[-10, 15, -5]} intensity={0.3} color="#93c5fd" />
+            <hemisphereLight skyColor="#1e3a5f" groundColor="#0f172a" intensity={0.4} />
+            <Ground />
+            <FloorSlab y={FLOOR_H} x={4.9}  z={2.0}  w={10.3} d={4.0} />
+            <FloorSlab y={FLOOR_H} x={2.15} z={7.05} w={4.3}  d={6.1} />
+            <FloorLabel floor={1} />
+            <FloorLabel floor={2} />
+            <BuildingOutline />
             {ROOMS.map(room => (
                 <RoomMesh key={room.id} room={room}
                           sensor={sensorState[room.id]}
@@ -393,163 +362,193 @@ function Scene({ sensorState, selectedRoom, onRoomSelect, sensorFilter }) {
                           onSelect={onRoomSelect}
                           sensorFilter={sensorFilter} />
             ))}
-
-            <OrbitControls makeDefault target={[5.0, 3.5, 5.0]}
-                           minDistance={5} maxDistance={38}
-                           minPolarAngle={0.1} maxPolarAngle={Math.PI/2.05}
-                           enableDamping dampingFactor={0.06} />
+            <OrbitControls target={[5.0, 3.5, 5.0]}
+                           minDistance={5} maxDistance={35}
+                           minPolarAngle={0} maxPolarAngle={Math.PI/2.1}
+                           enableDamping dampingFactor={0.05} />
         </>
     );
 }
 
-// ── Sensor detail panel (click) ────────────────────────────────────────────────
+// ── Sensor detail panel ───────────────────────────────────────────────────────
 function SensorPanel({ room, sensor, onClose }) {
     if (!room || !sensor) return null;
+
     const rows = [];
     if (room.id === 'Classroom_1') {
-        rows.push(['PIR Motion', sensor.motion ? '● Detected' : '○ Clear', sensor.motion ? '#34d399' : '#64748b']);
-        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF', sensor.lights ? '#fbbf24' : '#64748b']);
+        rows.push(['PIR Motion', sensor.motion ? 'Detected' : 'Clear']);
+        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF']);
     } else if (room.id === 'Classroom_2') {
-        if (sensor.lux != null) rows.push(['Ambient Lux', `${sensor.lux} lx`, sensor.lux < 80 ? '#f87171' : '#fbbf24']);
-        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF', sensor.lights ? '#fbbf24' : '#64748b']);
+        if (sensor.lux != null) rows.push(['Ambient Lux', `${sensor.lux} lx`]);
+        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF']);
     } else if (room.id === 'Large_Lecture_Hall') {
-        if (sensor.temperature_c != null) rows.push(['Indoor Temp', `${sensor.temperature_c.toFixed(1)}°C`, sensor.temperature_c > 35 ? '#ef4444' : sensor.temperature_c > 28 ? '#f87171' : '#34d399']);
-        if (sensor.outdoor_temp_c != null) rows.push(['Outdoor Temp', `${sensor.outdoor_temp_c.toFixed(1)}°C`, '#94a3b8']);
-        rows.push(['Fire Alert', sensor.fire_alert ? '⚠ ACTIVE' : 'Clear', sensor.fire_alert ? '#ef4444' : '#34d399']);
-        if (sensor.fan_active != null) rows.push(['Fan', sensor.fan_active ? 'ON' : 'OFF', sensor.fan_active ? '#38bdf8' : '#64748b']);
-        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF', sensor.lights ? '#fbbf24' : '#64748b']);
+        if (sensor.temperature_c != null) rows.push(['Temperature', `${sensor.temperature_c.toFixed(1)}°C`]);
+        rows.push(['Fire Alert', sensor.fire_alert ? 'ACTIVE' : 'None']);
+        if (sensor.lights != null) rows.push(['Lights', sensor.lights ? 'ON' : 'OFF']);
     } else {
-        if (sensor.temperature_c != null) rows.push(['Temperature', `${sensor.temperature_c.toFixed(1)}°C`, '#f87171']);
-        if (sensor.lux != null)           rows.push(['Lux', `${sensor.lux} lx`, '#fbbf24']);
-        if (sensor.motion != null)        rows.push(['Motion', sensor.motion ? 'Detected' : 'Clear', sensor.motion ? '#34d399' : '#64748b']);
-        if (sensor.lights != null)        rows.push(['Lights', sensor.lights ? 'ON' : 'OFF', sensor.lights ? '#fbbf24' : '#64748b']);
+        if (sensor.temperature_c != null) rows.push(['Temperature', `${sensor.temperature_c.toFixed(1)}°C`]);
+        if (sensor.lux != null)           rows.push(['Lux',         `${sensor.lux} lx`]);
+        if (sensor.motion != null)        rows.push(['Motion',      sensor.motion ? 'Detected' : 'Clear']);
+        if (sensor.lights != null)        rows.push(['Lights',      sensor.lights ? 'ON' : 'OFF']);
+        if (sensor.power_w != null)       rows.push(['Power',       `${sensor.power_w.toFixed(0)} W`]);
     }
-    const statusColor = sensor.fire_alert ? '#ef4444' : sensor.status === 'critical' ? '#ef4444' : sensor.status === 'warning' ? '#f59e0b' : '#10b981';
+
+    const statusColor = sensor.fire_alert ? '#ef4444'
+        : sensor.status === 'critical' ? '#ef4444'
+            : sensor.status === 'warning'  ? '#f59e0b'
+                : '#10b981';
+
     return (
-        <div style={{
-            position:'absolute', bottom:16, left:16, zIndex:10, width:210,
-            background:'rgba(5,8,18,0.96)', border:'1px solid #0f2244',
-            borderRadius:10, overflow:'hidden',
-            boxShadow:'0 4px 24px rgba(0,0,0,0.8)',
-        }}>
-            {/* Header */}
-            <div style={{ padding:'9px 12px', borderBottom:'1px solid #0a1a30',
-                background:'rgba(8,14,26,0.9)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-                    <span style={{ width:5, height:5, borderRadius:'50%', background:statusColor, flexShrink:0 }} />
-                    <span style={{ fontSize:11, fontWeight:700, color:'#cbd5e1', letterSpacing:'0.03em' }}>{room.label}</span>
+        <div className="absolute bottom-4 left-4 z-10 w-64 rounded-xl border border-slate-700 overflow-hidden"
+             style={{ background:'rgba(8,13,20,0.97)', boxShadow:'0 8px 32px rgba(0,0,0,0.5)' }}>
+            <div className="px-4 py-3 border-b border-slate-700/60 flex items-center justify-between"
+                 style={{ background:'rgba(15,23,42,0.8)' }}>
+                <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background:statusColor }} />
+                    <h3 className="text-sm font-bold text-white">{room.label.replace('\n',' ')}</h3>
                 </div>
-                <button onClick={onClose} style={{ background:'none', border:'none', color:'#334155', cursor:'pointer', padding:0, fontSize:13, lineHeight:1, opacity:0.7 }}>✕</button>
+                <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-sm">✕</button>
             </div>
-            {/* Fire banner */}
             {sensor.fire_alert && (
-                <div style={{ padding:'6px 14px', background:'rgba(127,29,29,0.8)', borderBottom:'1px solid #7f1d1d',
-                    display:'flex', alignItems:'center', gap:6, animation:'pulse 1s infinite' }}>
-                    <span style={{ fontSize:12 }}>🔥</span>
-                    <span style={{ fontSize:10, fontWeight:700, color:'#fca5a5', letterSpacing:'0.1em' }}>FIRE ALERT ACTIVE</span>
+                <div className="px-4 py-2 flex items-center gap-2"
+                     style={{ background:'rgba(127,29,29,0.8)' }}>
+                    <span className="text-xs font-bold text-red-300 uppercase tracking-widest">FIRE ALERT ACTIVE</span>
                 </div>
             )}
-            {/* Node chip */}
             {room.node && (
-                <div style={{ padding:'4px 14px', borderBottom:'1px solid #0f2244' }}>
-          <span style={{ fontSize:9, fontWeight:700, color:'#60a5fa', letterSpacing:'0.12em', fontFamily:"'DM Mono',monospace" }}>
-            NODE {room.node} · {room.id.replace(/_/g,' ')}
-          </span>
+                <div className="px-4 py-1.5 border-b border-slate-700/40">
+                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">IoT Node {room.node}</span>
                 </div>
             )}
-            {/* Data rows */}
-            <div style={{ padding:'8px 12px', display:'flex', flexDirection:'column', gap:5 }}>
+            <div className="px-4 py-3 space-y-1.5">
                 {rows.length === 0 && (
-                    <span style={{ fontSize:10, color:'#1e3a5f', fontStyle:'italic' }}>No sensor data</span>
+                    <p className="text-[11px] text-slate-500 italic">No sensor data</p>
                 )}
-                {rows.map(([label, val, color]) => (
-                    <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'2px 0' }}>
-                        <span style={{ fontSize:9, fontWeight:600, color:'#334155', textTransform:'uppercase', letterSpacing:'0.1em' }}>{label}</span>
-                        <span style={{ fontSize:11, fontWeight:700, color: color ?? '#cbd5e1', fontFamily:"'DM Mono',monospace" }}>{val}</span>
+                {rows.map(([label, val]) => (
+                    <div key={label} className="flex justify-between items-center">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{label}</span>
+                        <span className="text-[12px] font-bold text-slate-200" style={{ fontFamily:"'DM Mono',monospace" }}>{val}</span>
                     </div>
                 ))}
             </div>
-            {/* Footer */}
-            <div style={{ padding:'5px 12px', borderTop:'1px solid #0a1a30', display:'flex', justifyContent:'space-between', alignItems:'center', background:'rgba(4,8,16,0.6)' }}>
-                <span style={{ fontSize:8, color:'#1e3a5f', textTransform:'uppercase', letterSpacing:'0.12em' }}>Status</span>
-                <span style={{ fontSize:9, fontWeight:700, color:statusColor, textTransform:'uppercase', letterSpacing:'0.12em', fontFamily:"'DM Mono',monospace" }}>
-          {sensor.fire_alert ? 'FIRE' : sensor.status ?? 'OPTIMAL'}
+            <div className="px-4 py-2.5 border-t border-slate-700/40 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest">Status</span>
+                <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color:statusColor }}>
+          {sensor.fire_alert ? 'FIRE ALERT' : sensor.status ?? 'optimal'}
         </span>
             </div>
         </div>
     );
 }
 
-// ── Threshold panel (sensor filter) ───────────────────────────────────────────
+// ── Threshold panel ───────────────────────────────────────────────────────────
 const THRESHOLD_DATA = {
-    motion:      { icon:'👁', label:'PIR Motion', node:'Node 1 — Classroom A', unit:'', normal:{range:'No motion',action:null}, warning:{range:'Motion, no class',action:'Log unscheduled entry'}, critical:{range:'Motion after 18:00',action:'Security alert'}, getLive:s=>s?.motion!=null?(s.motion?'Detected':'Clear'):null, getStatus:s=>s?.motion?(s.campus_clock>=1800?'critical':'warning'):'normal' },
-    temperature: { icon:'🌡', label:'Temperature', node:'Node 3 — Lecture Hall', unit:'°C', normal:{range:'≤ 28°C',action:null}, warning:{range:'28–35°C',action:'Check HVAC'}, critical:{range:'> 35°C',action:'Fire protocol'}, getLive:s=>s?.temperature_c!=null?`${s.temperature_c.toFixed(1)}°C`:null, getStatus:s=>{const v=s?.temperature_c;return v==null?null:v>35?'critical':v>28?'warning':'normal';} },
-    lux:         { icon:'☀', label:'Ambient Lux', node:'Node 2 — Classroom B', unit:'lx', normal:{range:'≥ 300 lx',action:null}, warning:{range:'80–300 lx',action:'LEDs dimming'}, critical:{range:'< 80 lx',action:'LEDs at full brightness'}, getLive:s=>s?.lux!=null?`${s.lux} lx`:null, getStatus:s=>{const v=s?.lux;return v==null?null:v<80?'critical':v<300?'warning':'normal';} },
-    fire:        { icon:'🔥', label:'Fire Sim', node:'Node 3 — Lecture Hall', unit:'', normal:{range:'No spike',action:null}, warning:{range:'Rapid rise',action:'AI anomaly flag'}, critical:{range:'Instant spike',action:'Emergency protocol'}, getLive:s=>s?.fire_alert!=null?(s.fire_alert?'ALERT':'Clear'):null, getStatus:s=>s?.fire_alert?'critical':'normal' },
-    power:       { icon:'⚡', label:'Campus Power', node:'INA219 — All Rooms', unit:'W', normal:{range:'< 5 kW',action:null}, warning:{range:'5–8 kW',action:'Review active devices'}, critical:{range:'> 8 kW',action:'Audit all nodes'}, getLive:s=>s?.campus_power_w!=null?`${(s.campus_power_w/1000).toFixed(1)} kW`:null, getStatus:s=>{const v=s?.campus_power_w;return v==null?null:v>8000?'critical':v>5000?'warning':'normal';} },
+    motion: {
+        label:'Motion After Hours', icon:'Motion', node:'Node 1 (Classroom A)',
+        normal:   { range:'No motion', action:null },
+        warning:  { range:'Motion, no class', action:'Log unscheduled occupancy' },
+        critical: { range:'Motion after 18:00', action:'Security alert' },
+        getLive:   s => s?.motion != null ? (s.motion ? 'Detected' : 'Clear') : null,
+        getStatus: s => { if (!s?.motion) return 'normal'; return s.campus_clock >= 1800 ? 'critical' : 'warning'; },
+    },
+    temperature: {
+        label:'Temperature', icon:'Temp', node:'Node 3 (Lecture Hall)',
+        normal:   { range:'<= 28°C', action:null },
+        warning:  { range:'28–35°C', action:'Check HVAC' },
+        critical: { range:'> 35°C',  action:'Fire protocol' },
+        getLive:   s => s?.temperature_c != null ? `${s.temperature_c.toFixed(1)}°C` : null,
+        getStatus: s => { const v = s?.temperature_c; return v==null?null:v>35?'critical':v>28?'warning':'normal'; },
+    },
+    lux: {
+        label:'Ambient Lux', icon:'Lux', node:'Node 2 (Classroom B)',
+        normal:   { range:'>= 300 lx', action:null },
+        warning:  { range:'80–300 lx', action:'LEDs dimming' },
+        critical: { range:'< 80 lx',   action:'LEDs at full brightness' },
+        getLive:   s => s?.lux != null ? `${s.lux} lx` : null,
+        getStatus: s => { const v = s?.lux; return v==null?null:v<80?'critical':v<300?'warning':'normal'; },
+    },
+    fire: {
+        label:'Fire Simulation', icon:'Fire', node:'Node 3 (Lecture Hall)',
+        normal:   { range:'No spike', action:null },
+        warning:  { range:'Rapid rise', action:'AI anomaly flag' },
+        critical: { range:'Pot > 900', action:'Emergency protocol' },
+        getLive:   s => s?.fire_alert != null ? (s.fire_alert ? 'ALERT' : 'Clear') : null,
+        getStatus: s => s?.fire_alert ? 'critical' : 'normal',
+    },
+    power: {
+        label:'Power Consumption', icon:'Power', node:'INA219 — All Rooms',
+        normal:   { range:'< 5 kW', action:null },
+        warning:  { range:'5–8 kW', action:'Review active devices' },
+        critical: { range:'> 8 kW', action:'Audit all nodes' },
+        getLive:   s => s?.power_w != null ? `${(s.power_w/1000).toFixed(1)} kW` : null,
+        getStatus: s => { const v = s?.power_w; return v==null?null:v>8000?'critical':v>5000?'warning':'normal'; },
+    },
 };
+
 const SC = {
-    normal:   { dot:'#10b981', text:'#34d399', bg:'rgba(16,185,129,0.08)',  border:'rgba(16,185,129,0.2)'  },
-    warning:  { dot:'#f59e0b', text:'#fbbf24', bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)'  },
-    critical: { dot:'#ef4444', text:'#f87171', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)'   },
+    normal:   { dot:'#10b981', text:'#10b981', bg:'rgba(16,185,129,0.08)',  border:'rgba(16,185,129,0.2)'  },
+    warning:  { dot:'#f59e0b', text:'#f59e0b', bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)'  },
+    critical: { dot:'#ef4444', text:'#ef4444', bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)'   },
 };
 
 function ThresholdPanel({ sensorFilter, sensorState, onClose }) {
     if (sensorFilter === 'all') return null;
     const t = THRESHOLD_DATA[sensorFilter];
     if (!t) return null;
-    const readings = Object.entries(sensorState).map(([rid, s]) => {
-        const live = t.getLive(s); const status = t.getStatus(s);
+
+    const roomReadings = Object.entries(sensorState).map(([roomId, sensor]) => {
+        const live   = t.getLive(sensor);
+        const status = t.getStatus(sensor);
         if (!live || !status) return null;
-        return { roomId:rid, room:rid.replace(/_/g,' '), live, status };
+        return { roomId, room: roomId.replace(/_/g,' '), live, status };
     }).filter(Boolean);
 
     return (
-        <div style={{
-            position:'absolute', top:16, right:16, zIndex:20, width:268,
-            background:'rgba(6,10,20,0.97)', border:'1px solid #1e3a5f',
-            borderRadius:12, overflow:'hidden',
-            boxShadow:'0 0 30px rgba(59,130,246,0.12), 0 8px 32px rgba(0,0,0,0.8)',
-        }}>
-            <div style={{ padding:'10px 14px', borderBottom:'1px solid #0f2244',
-                background:'rgba(14,23,44,0.7)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <span style={{ fontSize:16 }}>{t.icon}</span>
-                    <div>
-                        <p style={{ fontSize:12, fontWeight:700, color:'#e2e8f0', margin:0 }}>{t.label}</p>
-                        <p style={{ fontSize:9, color:'#475569', margin:0 }}>{t.node}</p>
-                    </div>
+        <div className="absolute top-4 right-4 z-20 w-72 rounded-xl overflow-hidden border border-slate-700"
+             style={{ background:'rgba(8,13,20,0.97)', boxShadow:'0 8px 32px rgba(0,0,0,0.6)' }}>
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between"
+                 style={{ background:'rgba(15,23,42,0.6)' }}>
+                <div>
+                    <p className="text-sm font-bold text-white">{t.label}</p>
+                    <p className="text-[10px] text-blue-400 font-semibold mt-0.5">{t.node}</p>
                 </div>
-                <button onClick={onClose} style={{ background:'none', border:'none', color:'#475569', cursor:'pointer', fontSize:14 }}>✕</button>
+                <button onClick={onClose} className="text-slate-600 hover:text-slate-300 ml-2 text-sm">✕</button>
             </div>
-            {readings.length > 0 && (
-                <div style={{ padding:'8px 14px', borderBottom:'1px solid #0f2244' }}>
-                    {readings.map(r => {
-                        const sc = SC[r.status] ?? SC.normal;
+
+            {roomReadings.length > 0 && (
+                <div className="px-4 py-3 border-b border-slate-800 space-y-2">
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2">Live Readings</p>
+                    {roomReadings.map(r => {
+                        const sc = SC[r.status];
                         return (
-                            <div key={r.roomId} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
-                                <span style={{ fontSize:10, color:'#64748b' }}>{r.room}</span>
-                                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                                    <span style={{ fontSize:11, fontWeight:700, color:sc.text, fontFamily:"'DM Mono',monospace" }}>{r.live}</span>
-                                    <span style={{ fontSize:8, fontWeight:700, padding:'1px 5px', borderRadius:4,
-                                        color:sc.text, background:sc.bg, border:`1px solid ${sc.border}` }}>{r.status.toUpperCase()}</span>
+                            <div key={r.roomId} className="flex items-center justify-between">
+                                <span className="text-[11px] text-slate-400">{r.room}</span>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[12px] font-bold text-white" style={{ fontFamily:"'DM Mono',monospace" }}>{r.live}</span>
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                          style={{ color:sc.text, background:sc.bg, border:`1px solid ${sc.border}` }}>
+                    {r.status}
+                  </span>
                                 </div>
                             </div>
                         );
                     })}
                 </div>
             )}
-            <div style={{ padding:'10px 14px', display:'flex', flexDirection:'column', gap:6 }}>
+
+            <div className="px-4 py-3 space-y-2">
+                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2">Threshold Reference</p>
                 {['normal','warning','critical'].map(level => {
-                    const sc = SC[level]; const th = t[level];
+                    const sc = SC[level];
+                    const th = t[level];
                     return (
-                        <div key={level} style={{ padding:'8px 10px', borderRadius:8, background:sc.bg, border:`1px solid ${sc.border}` }}>
-                            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
-                                <span style={{ width:6, height:6, borderRadius:'50%', background:sc.dot, flexShrink:0 }} />
-                                <span style={{ fontSize:9, fontWeight:700, color:sc.dot, letterSpacing:'0.1em' }}>{level.toUpperCase()}</span>
+                        <div key={level} className="rounded-lg p-2.5" style={{ background:sc.bg, border:`1px solid ${sc.border}` }}>
+                            <div className="flex items-center gap-1.5 mb-1">
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ background:sc.dot }} />
+                                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color:sc.dot }}>{level}</span>
                             </div>
-                            <p style={{ fontSize:12, fontWeight:700, color:sc.text, margin:'0 0 3px', fontFamily:"'DM Mono',monospace" }}>{th.range}</p>
-                            {th.action && <p style={{ fontSize:9, color:'#64748b', margin:0 }}>{th.action}</p>}
+                            <p className="text-[12px] font-bold mb-1" style={{ color:sc.text, fontFamily:"'DM Mono',monospace" }}>{th.range}</p>
+                            {th.action && <p className="text-[10px] text-slate-400">{th.action}</p>}
                         </div>
                     );
                 })}
@@ -558,82 +557,84 @@ function ThresholdPanel({ sensorFilter, sensorState, onClose }) {
     );
 }
 
-// ── Legend ─────────────────────────────────────────────────────────────────────
 function Legend() {
     return (
-        <div style={{
-            position:'absolute', top:16, right:16, zIndex:10,
-            background:'rgba(5,8,18,0.94)', border:'1px solid #0f2244',
-            borderRadius:8, padding:'9px 12px',
-            boxShadow:'0 2px 12px rgba(0,0,0,0.7)',
-        }}>
-            <p style={{ fontSize:8, fontWeight:700, color:'#1e3a5f', textTransform:'uppercase', letterSpacing:'0.14em', margin:'0 0 7px' }}>Status</p>
-            {[['#38bdf8','Optimal'],['#f59e0b','Warning'],['#ef4444','Critical / Fire'],['#60a5fa','Selected']].map(([color, label]) => (
-                <div key={label} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
-                    <span style={{ width:10, height:10, borderRadius:2, background:color, boxShadow:`0 0 6px ${color}88`, flexShrink:0 }} />
-                    <span style={{ fontSize:11, fontWeight:600, color:'#64748b' }}>{label}</span>
+        <div className="absolute top-4 right-4 z-10 rounded-xl border border-slate-700 px-4 py-3"
+             style={{ background:'rgba(8,13,20,0.9)', boxShadow:'0 4px 16px rgba(0,0,0,0.4)' }}>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">Room Status</p>
+            {[
+                ['#10b981','Optimal'],
+                ['#d97706','Warning'],
+                ['#dc2626','Critical'],
+                ['#ef4444','Fire Alert'],
+                ['#2563eb','Selected'],
+            ].map(([color, label]) => (
+                <div key={label} className="flex items-center gap-2 mb-1.5 last:mb-0">
+                    <span className="w-3 h-3 rounded-sm" style={{ background:color, boxShadow:`0 0 4px ${color}80` }} />
+                    <span className="text-[11px] font-semibold text-slate-400">{label}</span>
                 </div>
             ))}
         </div>
     );
 }
 
-// ── Controls bar ───────────────────────────────────────────────────────────────
-function ControlsBar({ onResetCamera, sensorFilter, onSensorFilter }) {
+function ControlsBar({ activeFloor, onFloorChange, onResetCamera, sensorFilter, onSensorFilter }) {
     return (
-        <div style={{ position:'absolute', top:16, left:16, zIndex:10, display:'flex', flexDirection:'column', gap:8 }}>
-            {/* Reset */}
-            <button onClick={onResetCamera} style={{
-                background:'rgba(5,8,18,0.94)', border:'1px solid #0f2244', borderRadius:8,
-                padding:'5px 11px', color:'#7dd3fc', fontSize:10, fontWeight:700,
-                cursor:'pointer', display:'flex', alignItems:'center', gap:5,
-                boxShadow:'0 2px 8px rgba(0,0,0,0.6)', letterSpacing:'0.05em',
-            }}>
-                ⟳ Reset
+        <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
+            {/* Floor filter */}
+            <div className="rounded-xl border border-slate-700 p-1 flex gap-1"
+                 style={{ background:'rgba(8,13,20,0.9)' }}>
+                {['All','1','2'].map(f => (
+                    <button key={f} onClick={() => onFloorChange(f)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all
+                    ${activeFloor===f ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                        {f === 'All' ? 'Both Floors' : `Floor ${f}`}
+                    </button>
+                ))}
+            </div>
+
+            {/* Reset view */}
+            <button onClick={onResetCamera}
+                    className="border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-200 transition-colors"
+                    style={{ background:'rgba(8,13,20,0.9)' }}>
+                Reset View
             </button>
+
             {/* Sensor filter */}
-            <div style={{
-                background:'rgba(5,8,18,0.94)', border:'1px solid #0f2244', borderRadius:8,
-                padding:'7px', display:'flex', flexDirection:'column', gap:2,
-                boxShadow:'0 2px 8px rgba(0,0,0,0.6)',
-                minWidth:120,
-            }}>
-                <p style={{ fontSize:8, fontWeight:700, color:'#1e3a5f', textTransform:'uppercase', letterSpacing:'0.14em', margin:'0 2px 3px', fontFamily:"'DM Mono',monospace" }}>Filter</p>
+            <div className="rounded-xl border border-slate-700 p-1.5 flex flex-col gap-0.5"
+                 style={{ background:'rgba(8,13,20,0.9)' }}>
+                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest px-1 pb-1">Show Only</p>
                 {SENSOR_FILTER_CFG.map(cfg => {
                     const isActive = sensorFilter === cfg.id;
                     return (
-                        <button key={cfg.id} onClick={() => onSensorFilter(isActive && cfg.id !== 'all' ? 'all' : cfg.id)}
-                                style={{
-                                    background: isActive ? `${cfg.color}18` : 'transparent',
-                                    border:'none', borderLeft:`2px solid ${isActive ? cfg.color : '#0f2244'}`,
-                                    borderRadius:'0 6px 6px 0', padding:'5px 8px',
-                                    color: isActive ? cfg.color : '#475569',
-                                    fontSize:11, fontWeight:700, cursor:'pointer',
-                                    display:'flex', alignItems:'center', gap:7, textAlign:'left',
-                                    boxShadow: isActive ? `inset 0 0 10px ${cfg.color}11` : 'none',
-                                    transition:'all 0.15s',
-                                }}>
-              <span style={{ width:6, height:6, borderRadius:'50%', flexShrink:0,
-                  background: isActive ? cfg.color : '#1e293b',
-                  border:`1.5px solid ${isActive ? cfg.color : '#334155'}`,
-                  boxShadow: isActive ? `0 0 6px ${cfg.color}` : 'none' }} />
+                        <button key={cfg.id}
+                                onClick={() => onSensorFilter(isActive && cfg.id !== 'all' ? 'all' : cfg.id)}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all text-left"
+                                style={isActive
+                                    ? { background:`${cfg.color}28`, borderLeft:`2px solid ${cfg.color}`, color:cfg.color }
+                                    : { color:'#4b5563', borderLeft:'2px solid transparent' }}>
+              <span className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: isActive ? cfg.color : '#1e293b',
+                        border:`1.5px solid ${isActive ? cfg.color : '#334155'}` }} />
                             {cfg.label}
+                            {isActive && cfg.id !== 'all' && (
+                                <span style={{ fontSize:'9px', color:cfg.color, marginLeft:'auto' }}>✓</span>
+                            )}
                         </button>
                     );
                 })}
                 {sensorFilter !== 'all' && (
-                    <button onClick={() => onSensorFilter('all')} style={{
-                        marginTop:4, background:'none', border:'none', color:'#334155',
-                        fontSize:9, fontWeight:700, cursor:'pointer', textTransform:'uppercase',
-                        letterSpacing:'0.1em', padding:'4px 8px', borderTop:'1px solid #0f2244',
-                    }}>Clear Filter ×</button>
+                    <button onClick={() => onSensorFilter('all')}
+                            className="mt-1 text-[9px] font-bold text-slate-600 hover:text-slate-300 uppercase tracking-widest text-center py-1 transition-colors border-t border-slate-800">
+                        Clear filter
+                    </button>
                 )}
             </div>
         </div>
     );
 }
 
-// ── Main export ────────────────────────────────────────────────────────────────
+// ── Main export ───────────────────────────────────────────────────────────────
 export default function BuildingTwin3D({
                                            sensorState = MOCK_SENSOR_STATE,
                                            selectedRoom = null,
@@ -642,36 +643,39 @@ export default function BuildingTwin3D({
                                            compact = false,
                                        }) {
     const [localSelected, setLocalSelected] = useState(selectedRoom);
+    const [activeFloor,   setActiveFloor]   = useState('All');
     const [sensorFilter,  setSensorFilter]  = useState('all');
     const controlsRef = useRef();
 
     useEffect(() => { setLocalSelected(selectedRoom); }, [selectedRoom]);
 
     function handleRoomSelect(id) { setLocalSelected(id); onRoomSelect(id); }
+    function handleFloorChange(f) { setActiveFloor(f); setLocalSelected(null); onRoomSelect(null); }
     function resetCamera() { if (controlsRef.current) controlsRef.current.reset(); }
 
     const selectedRoomData = ROOMS.find(r => r.id === localSelected);
 
     return (
-        <div style={{ position:'relative', width:'100%', height, borderRadius:16, overflow:'hidden',
-            border:'1px solid #1e3a5f', background:'#060a14',
-            boxShadow:'0 0 40px rgba(59,130,246,0.08), 0 2px 8px rgba(0,0,0,0.6)' }}>
+        <div className="relative w-full rounded-xl overflow-hidden border border-slate-700"
+             style={{ height, background:'#0b0f1a' }}>
 
-            <Canvas shadows dpr={[1, 1.5]} frameloop="always"
-                    gl={{ antialias:true, alpha:false, powerPreference:'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
-                    camera={{ fov:50, position:[12, 10, 14] }}>
+            <Canvas frameloop="demand" shadows dpr={[1, 1.5]}
+                    gl={{ antialias:true, alpha:false, powerPreference:'high-performance' }}>
                 <Suspense fallback={null}>
                     <Scene sensorState={sensorState} selectedRoom={localSelected}
                            onRoomSelect={handleRoomSelect} sensorFilter={sensorFilter} />
                 </Suspense>
             </Canvas>
 
-            <ControlsBar onResetCamera={resetCamera} sensorFilter={sensorFilter} onSensorFilter={setSensorFilter} />
+            <ControlsBar activeFloor={activeFloor} onFloorChange={handleFloorChange}
+                         onResetCamera={resetCamera} sensorFilter={sensorFilter}
+                         onSensorFilter={setSensorFilter} />
 
             {!compact && sensorFilter === 'all' && <Legend />}
 
             {sensorFilter !== 'all' && (
-                <ThresholdPanel sensorFilter={sensorFilter} sensorState={sensorState} onClose={() => setSensorFilter('all')} />
+                <ThresholdPanel sensorFilter={sensorFilter} sensorState={sensorState}
+                                onClose={() => setSensorFilter('all')} />
             )}
 
             {localSelected && (
@@ -679,12 +683,9 @@ export default function BuildingTwin3D({
                              onClose={() => { setLocalSelected(null); onRoomSelect(null); }} />
             )}
 
-            {/* Live indicator */}
-            <div style={{ position:'absolute', bottom:12, right:12, display:'flex', alignItems:'center', gap:5,
-                fontSize:8, fontWeight:600, color:'#0f2244', textTransform:'uppercase', letterSpacing:'0.14em',
-                fontFamily:"'DM Mono',monospace", userSelect:'none' }}>
-                <span style={{ width:4, height:4, borderRadius:'50%', background:'#0369a1', opacity:0.7 }} />
-                RIT DUBAI · SMARTTWIN
+            <div className="absolute bottom-4 right-4 flex items-center gap-1.5 text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                SmartTwin · RIT Dubai
             </div>
         </div>
     );
