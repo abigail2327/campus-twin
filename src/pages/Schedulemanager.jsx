@@ -1,408 +1,333 @@
-/**
- * Schedulemanager.jsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Stakeholder-facing schedule input UI.
- * Writes to Firebase: schedule/{roomId}/slots/
- * predict.py reads this to generate class_scheduled = 1 or 0
- *
- * HOW TO ADD TO YOUR DASHBOARD:
- *   1. Drop this file into src/pages/Schedulemanager.jsx
- *   2. Add the route in your App.jsx / router
- *   3. Add a sidebar link in Sidebar.jsx
- * ─────────────────────────────────────────────────────────────────────────────
- */
+import { useState, useRef, useCallback } from "react";
+import * as XLSX from "xlsx";
+import { initializeApp, getApps } from "firebase/app";
+import { getDatabase, ref, set } from "firebase/database";
 
-import { useState, useEffect } from 'react';
-import { db } from '../services/firebase';
-import { ref, set, onValue, remove } from 'firebase/database';
-
-// ── Config ────────────────────────────────────────────────────────────────────
-const ROOMS = [
-    { fbId: 'classroom-1',  label: 'Classroom A', color: '#3b82f6', cap: 30  },
-    { fbId: 'classroom-2',  label: 'Classroom B', color: '#f59e0b', cap: 30  },
-    { fbId: 'lecture-hall', label: 'Lecture Hall', color: '#f87171', cap: 75  },
-];
-
-const DAYS = [
-    { val: 1, label: 'Mon' },
-    { val: 2, label: 'Tue' },
-    { val: 3, label: 'Wed' },
-    { val: 4, label: 'Thu' },
-    { val: 5, label: 'Fri' },
-];
-
-// Convert "09:00" → 900, "13:30" → 1330
-const timeToHHMM  = t => { const [h,m] = t.split(':'); return +h * 100 + +m; };
-// Convert 900 → "09:00", 1330 → "13:30"
-const HHMMToTime  = n => { const h = Math.floor(n/100); const m = n%100; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; };
-// Display "09:00" nicely
-const fmtDisplay  = t => { if (!t) return '—'; const [h,m] = t.split(':'); const hr = +h; return `${hr > 12 ? hr-12 : hr || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; };
-
-const DAY_COLORS = {
-    1: '#6366f1', 2: '#0ea5e9', 3: '#10b981', 4: '#f59e0b', 5: '#f43f5e',
+// ── Firebase config ───────────────────────────────────────────────────────────
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBzxApxrpX1C9xGLRpHKanGQMMjOrbVFnM",
+  authDomain: "twinergy-c8145.firebaseapp.com",
+  databaseURL: "https://twinergy-c8145-default-rtdb.firebaseio.com",
+  projectId: "twinergy-c8145",
+  storageBucket: "twinergy-c8145.firebasestorage.app",
+  messagingSenderId: "255963355265",
+  appId: "1:255963355265:web:8f6936e0db382a98105580"
 };
 
-// ── Empty slot template ───────────────────────────────────────────────────────
-const emptySlot = () => ({ day: 1, start: '09:00', end: '10:00', course: '', capacity: 30 });
+if (!getApps().length) initializeApp(FIREBASE_CONFIG);
+const db = getDatabase();
 
-// ── Slot pill shown in the schedule grid ─────────────────────────────────────
-function SlotPill({ slot, onDelete, roomColor }) {
-    return (
-        <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            background: `${DAY_COLORS[slot.day]}18`,
-            border: `1px solid ${DAY_COLORS[slot.day]}44`,
-            borderLeft: `3px solid ${DAY_COLORS[slot.day]}`,
-            borderRadius: 8, padding: '7px 10px', gap: 8,
-        }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: '#0f172a',
-                    fontFamily: "'DM Mono', monospace", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {slot.course || '(No name)'}
-                </p>
-                <p style={{ margin: 0, fontSize: 10, color: '#64748b', marginTop: 1 }}>
-                    {fmtDisplay(HHMMToTime(slot.start))} – {fmtDisplay(HHMMToTime(slot.end))}
-                    {slot.capacity ? <span style={{ marginLeft: 6, color: '#94a3b8' }}>· {slot.capacity} seats</span> : null}
-                </p>
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color: DAY_COLORS[slot.day],
-                background: `${DAY_COLORS[slot.day]}22`, borderRadius: 6,
-                padding: '2px 7px', flexShrink: 0 }}>
-        {DAYS.find(d => d.val === slot.day)?.label}
-      </span>
-            <button onClick={onDelete}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer',
-                        color: '#cbd5e1', fontSize: 14, lineHeight: 1, padding: '0 2px',
-                        borderRadius: 4, transition: 'color 0.15s' }}
-                    onMouseEnter={e => e.target.style.color = '#ef4444'}
-                    onMouseLeave={e => e.target.style.color = '#cbd5e1'}>
-                ✕
-            </button>
-        </div>
-    );
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const ROOM_MAP = {
+  "classroom-1": "classroom-1", "classroom1": "classroom-1", "c106": "classroom-1",
+  "classroom-2": "classroom-2", "classroom2": "classroom-2", "c109": "classroom-2",
+  "lecture-hall": "lecture-hall", "lecturehall": "lecture-hall", "b004": "lecture-hall",
+};
+
+const DAY_MAP = {
+  M: 1, MON: 1, MONDAY: 1,
+  T: 2, TUE: 2, TUESDAY: 2,
+  W: 3, WED: 3, WEDNESDAY: 3,
+  R: 4, THU: 4, THURSDAY: 4,
+  F: 5, FRI: 5, FRIDAY: 5,
+};
+
+const DAY_PATTERNS = {
+  MWF: [1, 3, 5], TR: [2, 4], MW: [1, 3],
+  MTR: [1, 2, 4], MTWRF: [1, 2, 3, 4, 5],
+};
+
+function parseDays(raw) {
+  if (!raw) return [];
+  const up = String(raw).trim().toUpperCase().replace(/\s+/g, "");
+  if (DAY_PATTERNS[up]) return DAY_PATTERNS[up];
+  return up.split("").map(c => DAY_MAP[c]).filter(Boolean);
 }
 
-// ── Add slot form ─────────────────────────────────────────────────────────────
-function AddSlotForm({ onAdd, onCancel, roomColor }) {
-    const [slot, setSlot] = useState(emptySlot());
-    const [err,  setErr]  = useState('');
+function parseTime(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{3,4}$/.test(s)) return parseInt(s, 10);
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (m) return parseInt(m[1], 10) * 100 + parseInt(m[2], 10);
+  return null;
+}
 
-    function validate() {
-        if (!slot.course.trim()) return 'Enter a course name';
-        if (timeToHHMM(slot.start) >= timeToHHMM(slot.end)) return 'End time must be after start time';
-        return '';
+function normaliseRoom(raw) {
+  if (!raw) return null;
+  return ROOM_MAP[String(raw).trim().toLowerCase().replace(/\s+/g, "")] || null;
+}
+
+function parseSheet(rows) {
+  let headerIdx = -1, headers = [];
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i].map(c => String(c || "").toLowerCase().trim());
+    if (row.some(c => c.includes("room")) && row.some(c => c.includes("day"))) {
+      headerIdx = i; headers = row; break;
     }
+  }
+  if (headerIdx === -1) return { slots: [], errors: ["Could not find header row with 'Room' and 'Days' columns"] };
 
-    function submit() {
-        const e = validate();
-        if (e) { setErr(e); return; }
-        onAdd({ ...slot, start: timeToHHMM(slot.start), end: timeToHHMM(slot.end) });
-    }
+  const col = name => headers.findIndex(h => h.includes(name));
+  const iRoom = col("room"), iDays = col("day"), iStart = col("start"), iEnd = col("end");
+  const iCourse = col("course") !== -1 ? col("course") : col("subject");
 
-    const field = (label, content) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8',
-                textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</label>
-            {content}
-        </div>
-    );
+  if (iRoom === -1 || iDays === -1 || iStart === -1 || iEnd === -1)
+    return { slots: [], errors: ["Missing required columns: Room, Days, Start Time, End Time"] };
 
-    const inputStyle = {
-        border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px',
-        fontSize: 12, color: '#0f172a', background: '#f8fafc', outline: 'none',
-        fontFamily: "'DM Mono', monospace",
+  const slots = [], errors = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every(c => !c)) continue;
+    const roomId = normaliseRoom(row[iRoom]);
+    const days   = parseDays(row[iDays]);
+    const start  = parseTime(row[iStart]);
+    const end    = parseTime(row[iEnd]);
+    const course = iCourse !== -1 ? String(row[iCourse] || "").trim() : "";
+    if (!roomId) { errors.push(`Row ${i + 1}: unknown room "${row[iRoom]}"`); continue; }
+    if (!days.length) { errors.push(`Row ${i + 1}: could not parse days "${row[iDays]}"`); continue; }
+    if (start === null) { errors.push(`Row ${i + 1}: bad start time "${row[iStart]}"`); continue; }
+    if (end === null)   { errors.push(`Row ${i + 1}: bad end time "${row[iEnd]}"`); continue; }
+    for (const day of days) slots.push({ roomId, day, start, end, course });
+  }
+  return { slots, errors };
+}
+
+function groupByRoom(slots) {
+  const rooms = {};
+  slots.forEach((s) => {
+    if (!rooms[s.roomId]) rooms[s.roomId] = [];
+    rooms[s.roomId].push({ day: s.day, start: s.start, end: s.end, course: s.course });
+  });
+  return rooms;
+}
+
+function fmtTime(hhmm) {
+  const h = Math.floor(hhmm / 100), m = hhmm % 100;
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
+
+const DAY_NAMES   = ["", "Mon", "Tue", "Wed", "Thu", "Fri"];
+const ROOM_LABELS = { "classroom-1": "Classroom 1", "classroom-2": "Classroom 2", "lecture-hall": "Lecture Hall" };
+
+// ── Component ─────────────────────────────────────────────────────────────────
+export default function ScheduleManager() {
+  const [dragging,  setDragging]  = useState(false);
+  const [fileName,  setFileName]  = useState(null);
+  const [slots,     setSlots]     = useState([]);
+  const [errors,    setErrors]    = useState([]);
+  const [status,    setStatus]    = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef();
+
+  const processFile = useCallback((file) => {
+    if (!file) return;
+    setFileName(file.name); setStatus(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb   = XLSX.read(e.target.result, { type: "array" });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        const { slots: parsed, errors: errs } = parseSheet(rows);
+        setSlots(parsed); setErrors(errs);
+        if (!parsed.length && !errs.length) setErrors(["No valid rows found."]);
+      } catch (err) { setErrors([`Could not read file: ${err.message}`]); setSlots([]); }
     };
+    reader.readAsArrayBuffer(file);
+  }, []);
 
-    return (
-        <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0',
-            borderRadius: 12, padding: 16, marginTop: 8 }}>
-            <p style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 700, color: '#334155' }}>
-                Add Class Slot
-            </p>
+  const onDrop = useCallback((e) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, [processFile]);
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                {field('Course name',
-                    <input value={slot.course} onChange={e => setSlot(p => ({...p, course: e.target.value}))}
-                           placeholder="e.g. CS-101 Intro to Programming"
-                           style={{ ...inputStyle, fontFamily: 'inherit' }} />
-                )}
-                {field('Day',
-                    <select value={slot.day} onChange={e => setSlot(p => ({...p, day: +e.target.value}))}
-                            style={inputStyle}>
-                        {DAYS.map(d => <option key={d.val} value={d.val}>{d.label}</option>)}
-                    </select>
-                )}
-                {field('Start time',
-                    <input type="time" value={slot.start}
-                           onChange={e => setSlot(p => ({...p, start: e.target.value}))}
-                           style={inputStyle} />
-                )}
-                {field('End time',
-                    <input type="time" value={slot.end}
-                           onChange={e => setSlot(p => ({...p, end: e.target.value}))}
-                           style={inputStyle} />
-                )}
-                {field('Capacity (optional)',
-                    <input type="number" value={slot.capacity} min={1} max={200}
-                           onChange={e => setSlot(p => ({...p, capacity: +e.target.value}))}
-                           style={inputStyle} />
-                )}
-            </div>
-
-            {err && <p style={{ fontSize: 11, color: '#ef4444', margin: '0 0 8px' }}>⚠ {err}</p>}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={submit}
-                        style={{ flex: 1, padding: '9px 0', borderRadius: 9, border: 'none',
-                            background: roomColor, color: '#fff', fontSize: 12, fontWeight: 700,
-                            cursor: 'pointer' }}>
-                    Save to Firebase
-                </button>
-                <button onClick={onCancel}
-                        style={{ padding: '9px 16px', borderRadius: 9,
-                            border: '1px solid #e2e8f0', background: '#fff',
-                            color: '#64748b', fontSize: 12, cursor: 'pointer' }}>
-                    Cancel
-                </button>
-            </div>
-        </div>
-    );
-}
-
-// ── Room schedule card ────────────────────────────────────────────────────────
-function RoomScheduleCard({ room }) {
-    const [slots,      setSlots]      = useState({});
-    const [showForm,   setShowForm]   = useState(false);
-    const [saving,     setSaving]     = useState(false);
-    const [savedFlash, setSavedFlash] = useState(false);
-
-    // Subscribe to Firebase schedule for this room
-    useEffect(() => {
-        const r = ref(db, `schedule/${room.fbId}/slots`);
-        const unsub = onValue(r, snap => setSlots(snap.val() ?? {}));
-        return () => unsub();
-    }, [room.fbId]);
-
-    async function addSlot(slot) {
-        setSaving(true);
-        const slotKey = `slot_${Date.now()}`;
-        await set(ref(db, `schedule/${room.fbId}/slots/${slotKey}`), slot);
-        setSaving(false);
-        setSavedFlash(true);
-        setTimeout(() => setSavedFlash(false), 2000);
-        setShowForm(false);
-    }
-
-    async function deleteSlot(slotKey) {
-        await remove(ref(db, `schedule/${room.fbId}/slots/${slotKey}`));
-    }
-
-    const slotList = Object.entries(slots).sort((a, b) => {
-        const da = a[1].day * 10000 + a[1].start;
-        const db_ = b[1].day * 10000 + b[1].start;
-        return da - db_;
-    });
-
-    return (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0',
-            borderRadius: 16, overflow: 'hidden',
-            boxShadow: savedFlash ? `0 0 0 2px ${room.color}55` : '0 1px 6px rgba(0,0,0,0.06)',
-            transition: 'box-shadow 0.3s' }}>
-
-            {/* Color bar */}
-            <div style={{ height: 3, background: room.color }} />
-
-            <div style={{ padding: '14px 16px' }}>
-                {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                            {room.label}
-                        </p>
-                        <p style={{ margin: 0, fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                            {slotList.length} class{slotList.length !== 1 ? 'es' : ''} scheduled
-                            {savedFlash && <span style={{ color: '#10b981', marginLeft: 6 }}>✓ Saved!</span>}
-                        </p>
-                    </div>
-                    <button onClick={() => setShowForm(p => !p)}
-                            style={{ display: 'flex', alignItems: 'center', gap: 5,
-                                padding: '7px 12px', borderRadius: 9, border: 'none',
-                                background: showForm ? '#f1f5f9' : room.color,
-                                color: showForm ? '#64748b' : '#fff',
-                                fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                        {showForm ? '✕ Cancel' : '+ Add Class'}
-                    </button>
-                </div>
-
-                {/* Slot list */}
-                {slotList.length === 0 && !showForm && (
-                    <div style={{ textAlign: 'center', padding: '20px 0',
-                        color: '#cbd5e1', fontSize: 11 }}>
-                        No classes scheduled yet —<br />
-                        <span style={{ color: room.color, cursor: 'pointer', fontWeight: 600 }}
-                              onClick={() => setShowForm(true)}>
-              add the first one
-            </span>
-                    </div>
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {slotList.map(([key, slot]) => (
-                        <SlotPill key={key} slot={slot} roomColor={room.color}
-                                  onDelete={() => deleteSlot(key)} />
-                    ))}
-                </div>
-
-                {/* Add form */}
-                {showForm && (
-                    <AddSlotForm roomColor={room.color}
-                                 onAdd={addSlot}
-                                 onCancel={() => setShowForm(false)} />
-                )}
-
-                {saving && (
-                    <p style={{ fontSize: 10, color: '#94a3b8', margin: '8px 0 0',
-                        fontFamily: "'DM Mono', monospace" }}>
-                        ↑ Writing to Firebase…
-                    </p>
-                )}
-            </div>
-        </div>
-    );
-}
-
-// ── Weekly overview strip ─────────────────────────────────────────────────────
-function WeeklyOverview({ allSlots }) {
-    return (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0',
-            borderRadius: 14, padding: '14px 18px' }}>
-            <p style={{ margin: '0 0 10px', fontSize: 10, fontWeight: 700,
-                color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Weekly Overview
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6 }}>
-                {DAYS.map(day => {
-                    const daySlots = allSlots.filter(s => s.day === day.val);
-                    return (
-                        <div key={day.val} style={{ borderRadius: 10,
-                            background: daySlots.length > 0 ? `${DAY_COLORS[day.val]}12` : '#f8fafc',
-                            border: `1px solid ${daySlots.length > 0 ? DAY_COLORS[day.val]+'33' : '#f1f5f9'}`,
-                            padding: '8px 10px' }}>
-                            <p style={{ margin: '0 0 4px', fontSize: 10, fontWeight: 700,
-                                color: daySlots.length > 0 ? DAY_COLORS[day.val] : '#cbd5e1' }}>
-                                {day.label}
-                            </p>
-                            {daySlots.length === 0
-                                ? <p style={{ margin: 0, fontSize: 9, color: '#cbd5e1' }}>No classes</p>
-                                : daySlots.map((s, i) => (
-                                    <p key={i} style={{ margin: '2px 0 0', fontSize: 9,
-                                        color: '#475569', fontFamily: "'DM Mono', monospace" }}>
-                                        {fmtDisplay(HHMMToTime(s.start))} {s.course?.split(' ')[0]}
-                                    </p>
-                                ))
-                            }
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-// ── Main export ───────────────────────────────────────────────────────────────
-export default function Schedulemanager() {
-    const [allSlots, setAllSlots] = useState([]);
-
-    // Aggregate all slots across rooms for weekly overview
-    useEffect(() => {
-        const unsubs = ROOMS.map(room => {
-            const r = ref(db, `schedule/${room.fbId}/slots`);
-            return onValue(r, snap => {
-                const slots = Object.values(snap.val() ?? {});
-                setAllSlots(prev => {
-                    const others = prev.filter(s => s._room !== room.fbId);
-                    return [...others, ...slots.map(s => ({ ...s, _room: room.fbId }))];
-                });
-            });
+  const handleUpload = async () => {
+    if (!slots.length) return;
+    setUploading(true);
+    setStatus({ type: "loading", msg: "Writing to Firebase..." });
+    try {
+      const grouped = groupByRoom(slots);
+      for (const [roomId, roomSlots] of Object.entries(grouped)) {
+        const slotsObj = {};
+        roomSlots.forEach((s, i) => {
+          slotsObj[`slot_${i}`] = { day: s.day, start: s.start, end: s.end, course: s.course };
         });
-        return () => unsubs.forEach(u => u());
-    }, []);
+        await set(ref(db, `schedule/${roomId}/slots`), slotsObj);
+      }
+      setStatus({ type: "success", msg: `Done — ${slots.length} slots pushed across ${Object.keys(grouped).length} rooms. predict.py will pick this up on the next cycle.` });
+    } catch (err) {
+      setStatus({ type: "error", msg: `Firebase error: ${err.message}` });
+    } finally { setUploading(false); }
+  };
 
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+  const handleReset = () => {
+    setSlots([]); setErrors([]); setFileName(null); setStatus(null);
+    if (inputRef.current) inputRef.current.value = "";
+  };
 
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'flex-start',
-                justifyContent: 'space-between' }}>
-                <div>
-                    <h2 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0 }}>
-                        Schedule Manager
-                    </h2>
-                    <p style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 0' }}>
-                        Add class slots here → saved to Firebase →{' '}
-                        <code style={{ fontSize: 10, background: '#f1f5f9',
-                            padding: '1px 5px', borderRadius: 4, color: '#475569' }}>
-                            predict.py
-                        </code>
-                        {' '}reads it → AI knows when class is scheduled
-                    </p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6,
-                    background: '#f0fdf4', border: '1px solid #bbf7d0',
-                    borderRadius: 8, padding: '6px 12px' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%',
-              background: '#22c55e', display: 'inline-block' }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a' }}>
-            Live · Writes to Firebase
-          </span>
-                </div>
-            </div>
+  const grouped = groupByRoom(slots);
 
-            {/* How it works */}
-            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe',
-                borderRadius: 12, padding: '12px 16px',
-                display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                {[
-                    ['1. Add class slots', 'Enter course name, day, start + end time per room'],
-                    ['2. Saved to Firebase', 'Writes to schedule/{room}/slots/ instantly'],
-                    ['3. predict.py reads it', 'Checks current time against slots → class_scheduled = 1 or 0'],
-                    ['4. AI uses it', 'Model predicts occupancy using schedule + live sensor data'],
-                ].map(([step, desc]) => (
-                    <div key={step} style={{ flex: 1, minWidth: 140 }}>
-                        <p style={{ margin: '0 0 2px', fontSize: 10, fontWeight: 700,
-                            color: '#2563eb' }}>{step}</p>
-                        <p style={{ margin: 0, fontSize: 10, color: '#3b82f6',
-                            lineHeight: 1.4 }}>{desc}</p>
-                    </div>
-                ))}
-            </div>
+  return (
+    <div style={{ padding: "24px", maxWidth: 820 }}>
 
-            {/* Weekly overview */}
-            <WeeklyOverview allSlots={allSlots} />
+      {/* Sub-header */}
+      <p style={{ fontSize: 13, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>
+        Upload a timetable Excel file. Slots are written to Firebase under{" "}
+        <code style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", padding: "1px 6px", borderRadius: 4, fontSize: 12, color: "#475569" }}>
+          schedule/&#123;roomId&#125;/slots
+        </code>
+        . predict.py reads this automatically on every cycle.
+      </p>
 
-            {/* Room cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
-                {ROOMS.map(room => (
-                    <RoomScheduleCard key={room.fbId} room={room} />
-                ))}
-            </div>
+      {/* Drop zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${dragging ? "#3b82f6" : "#e2e8f0"}`,
+          borderRadius: 12,
+          padding: "40px 24px",
+          textAlign: "center",
+          cursor: "pointer",
+          background: dragging ? "#eff6ff" : "#fafafa",
+          transition: "all 0.2s",
+          marginBottom: 20,
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files[0]; if (f) processFile(f); }}
+        />
 
-            {/* Firebase path info */}
-            <div style={{ background: '#f8fafc', border: '1px solid #f1f5f9',
-                borderRadius: 12, padding: '12px 16px' }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: '#475569', margin: '0 0 6px',
-                    textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Firebase schema written by this page
-                </p>
-                <pre style={{ margin: 0, fontSize: 10, color: '#64748b', lineHeight: 1.7,
-                    fontFamily: "'DM Mono', monospace" }}>
-{`schedule/
-  classroom-1/slots/slot_1234/  { day:1, start:900, end:955, course:"CS-101", capacity:30 }
-  classroom-2/slots/slot_5678/  { day:2, start:1030, end:1150, course:"MA-201", capacity:25 }
-  lecture-hall/slots/slot_9012/ { day:3, start:1200, end:1300, course:"COMM-HR", capacity:75 }`}
-        </pre>
-            </div>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10,
+          background: "#eff6ff", border: "1px solid #bfdbfe",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          margin: "0 auto 14px",
+        }}>
+          <svg width="18" height="18" fill="none" stroke="#3b82f6" strokeWidth="1.8" viewBox="0 0 24 24">
+            <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12M8 8l4-4 4 4"/>
+          </svg>
         </div>
-    );
+
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 5 }}>
+          {fileName ? fileName : "Drop your Excel schedule here"}
+        </div>
+        <div style={{ fontSize: 12, color: "#94a3b8" }}>
+          {fileName ? `${slots.length} slots parsed` : "or click to browse  ·  .xlsx  .xls  .csv"}
+        </div>
+      </div>
+
+      {/* Parse warnings */}
+      {errors.length > 0 && (
+        <div style={{
+          background: "#fef2f2", border: "1px solid #fecaca",
+          borderRadius: 8, padding: "12px 16px", marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "#dc2626", marginBottom: 8, fontWeight: 600 }}>
+            Parse warnings ({errors.length})
+          </div>
+          {errors.map((e, i) => (
+            <div key={i} style={{ fontSize: 12, color: "#b91c1c", fontFamily: "monospace", marginBottom: 2 }}>— {e}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Preview */}
+      {slots.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 14, fontWeight: 600 }}>
+            Preview — {slots.length} slots parsed
+          </div>
+
+          {Object.entries(grouped).map(([roomId, roomSlots]) => (
+            <div key={roomId} style={{ marginBottom: 14, border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+              {/* Room header */}
+              <div style={{ background: "#f8fafc", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e2e8f0" }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6" }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                  {ROOM_LABELS[roomId] || roomId}
+                </span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
+                  {roomSlots.length} slots
+                </span>
+              </div>
+
+              {/* Table */}
+              <table style={{ width: "100%", borderCollapse: "collapse", background: "#ffffff" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {["Day", "Start", "End", "Course"].map(h => (
+                      <th key={h} style={{ padding: "8px 16px", textAlign: "left", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "#94a3b8", fontWeight: 600, borderBottom: "1px solid #f1f5f9" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {roomSlots.map((s, i) => (
+                    <tr key={i} style={{ borderBottom: i < roomSlots.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <td style={{ padding: "9px 16px", fontSize: 12, fontFamily: "monospace", color: "#2563eb", fontWeight: 500 }}>{DAY_NAMES[s.day]}</td>
+                      <td style={{ padding: "9px 16px", fontSize: 12, fontFamily: "monospace", color: "#64748b" }}>{fmtTime(s.start)}</td>
+                      <td style={{ padding: "9px 16px", fontSize: 12, fontFamily: "monospace", color: "#64748b" }}>{fmtTime(s.end)}</td>
+                      <td style={{ padding: "9px 16px", fontSize: 13, color: "#1e293b" }}>{s.course || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+          {/* Buttons */}
+          <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+            <button
+              onClick={handleUpload}
+              disabled={uploading}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: uploading ? "#93c5fd" : "#2563eb",
+                color: "#fff", border: "none", borderRadius: 8,
+                padding: "10px 22px", fontSize: 14, fontWeight: 600,
+                cursor: uploading ? "not-allowed" : "pointer",
+                transition: "background 0.15s",
+              }}
+            >
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              {uploading ? "Uploading..." : "Push to Firebase"}
+            </button>
+            <button
+              onClick={handleReset}
+              style={{
+                background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+                padding: "10px 18px", fontSize: 14, color: "#64748b", cursor: "pointer",
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Status message */}
+      {status && (
+        <div style={{
+          marginTop: 16, padding: "12px 16px", borderRadius: 8, fontSize: 13, fontFamily: "monospace",
+          background: status.type === "success" ? "#f0fdf4" : status.type === "error" ? "#fef2f2" : "#eff6ff",
+          border: `1px solid ${status.type === "success" ? "#bbf7d0" : status.type === "error" ? "#fecaca" : "#bfdbfe"}`,
+          color: status.type === "success" ? "#15803d" : status.type === "error" ? "#dc2626" : "#1d4ed8",
+        }}>
+          {status.msg}
+        </div>
+      )}
+    </div>
+  );
 }

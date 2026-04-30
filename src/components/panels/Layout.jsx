@@ -82,6 +82,7 @@ function EmergencyModal({ onClose }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Nav items
 // ─────────────────────────────────────────────────────────────────────────────
+
 const NAV = [
     { to: '/',          label: 'Dashboard',         icon: 'dashboard'  },
     { to: '/building',  label: 'Building Overview', icon: 'building'   },
@@ -89,6 +90,7 @@ const NAV = [
     { to: '/alerts',    label: 'Alerts',            icon: 'alerts',    badge: 3 },
     { to: '/analytics', label: 'Reports',           icon: 'analytics'  },
     { to: '/ontology',  label: 'Ontology',          icon: 'activity'   },
+    { to: '/schedule',  label: 'Schedule',          icon: 'dashboard'  }, // ← add this
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

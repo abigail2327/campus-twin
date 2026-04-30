@@ -17,7 +17,7 @@ import Analytics      from './pages/Analytics';
 import Twin3DPage     from './pages/Twin3DPage';
 import OntologyGraph  from './pages/OntologyGraph';
 
-import Schedulemanager from './pages/Schedulemanager.jsx';
+import Schedulemanager from './pages/ScheduleManager.jsx';
 
 
 

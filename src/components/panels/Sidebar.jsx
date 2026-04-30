@@ -8,7 +8,7 @@ const NAV = [
     { to: '/devices',   icon: 'memory',            label: 'Device Twin' },
     { to: '/alerts',    icon: 'notifications',     label: 'Alerts' },
     { to: '/analytics', icon: 'bar_chart',         label: 'Analytics' },
-    { to: '/schedule',  icon: 'calendar_month',    label: 'Schedule' },
+    { to: '/schedule',  icon: 'calendar_month',    label: 'Schedule' },   // ← added
 ]
 
 export default function Sidebar() {
@@ -34,7 +34,7 @@ export default function Sidebar() {
                         end={to === '/'}
                         className={({ isActive }) =>
                             `flex items-center gap-3 px-4 py-3.5 rounded-custom transition-all text-sm font-medium
-                ${isActive
+               ${isActive
                                 ? 'bg-white/10 text-white font-semibold'
                                 : 'hover:bg-white/5 hover:text-slate-200'
                             }`
