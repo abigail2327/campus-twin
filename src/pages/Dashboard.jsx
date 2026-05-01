@@ -47,7 +47,7 @@ const NODES = [
         label:    'Multipurpose Hall',
         node:     3,
         type:     'DHT Temp + PIR + Fire Sim + Fan',
-        capacity: 100,
+        capacity: 75,
         icon:     'temperature',
         color:    '#10b981',
     },
@@ -81,12 +81,12 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
 
     const isOffline = !sensor || sensor.status === 'offline' || sensor.online === false;
 
-    const bg     = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)';
+    const bg     = '#ffffff';
     const border = selected
         ? `2px solid ${node.color}`
-        : dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)';
-    const textPrimary   = dark ? '#f1f5f9' : '#0f172a';
-    const textSecondary = dark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.5)';
+        : '1px solid #e8ecf0';
+    const textPrimary   = '#0f172a';
+    const textSecondary = 'rgba(15,23,42,0.5)';
 
     // ── Offline card ─────────────────────────────────────────────────────────────
     if (isOffline) {
@@ -123,7 +123,7 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
 
     // ── Live card ─────────────────────────────────────────────────────────────────
     const status = getRoomStatus(sensor);
-    const metricBg = dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+    const metricBg = '#f7f8fa';
 
     // Per-room metric config
     const isC1 = node.id === 'Classroom_1';
@@ -231,7 +231,7 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
                             {lhOccupancyPct != null && (
                                 <>
                                     <div className="mt-1.5 h-1 rounded-full overflow-hidden"
-                                         style={{ background: dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}>
+                                         style={{ background: 'rgba(0,0,0,0.08)' }}>
                                         <div className="h-full rounded-full transition-all"
                                              style={{ width:`${Math.min(100, lhOccupancyPct)}%`,
                                                  background: lhOccupancyPct > 85 ? '#ef4444' : lhOccupancyPct > 60 ? '#f59e0b' : node.color }} />
@@ -266,86 +266,92 @@ function NodeCard({ node, sensor, selected, onSelect, dark }) {
 
 // ── Energy summary card ───────────────────────────────────────────────────────
 function EnergySummary({ kpi, sensorState, dark }) {
-    const bg          = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)';
-    const border      = dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)';
-    const textPrimary = dark ? '#f1f5f9' : '#0f172a';
-    const textMuted   = dark ? 'rgba(255,255,255,0.35)' : 'rgba(15,23,42,0.4)';
+    const bg          = '#ffffff';
+    const border      = '1px solid #e8ecf0';
+    const textPrimary = '#0f172a';
+    const textMuted   = 'rgba(15,23,42,0.4)';
+    const metricBg    = '#f7f8fa';
 
-    // Live power draw from Firebase energy.powerDraw (classroom-1 node has INA219)
-    // firebase.js maps energy.powerDraw (mW) → power_w (W) for Classroom_1
-    const livePowerW   = sensorState?.Classroom_1?.power_w ?? null;
-    const isLive       = livePowerW != null && livePowerW > 0;
-    const livePowerStr = isLive
-        ? (livePowerW >= 1000 ? `${(livePowerW/1000).toFixed(2)} kW` : `${Math.round(livePowerW)} W`)
-        : null;
+    // Live power draw — classroom-1 energy.powerDraw (mW) → W via firebase.js mapFirebaseRoom
+    const powerW = sensorState?.Classroom_1?.power_w ?? null;
+    const isLive = powerW != null && powerW > 0;
+    const powerStr = isLive
+        ? powerW >= 1000
+            ? `${(powerW / 1000).toFixed(2)} kW`
+            : `${Math.round(powerW)} W`
+        : '—';
 
-    const wastePct  = kpi.wastePct ?? 12.3;
-    const wasteColor = wastePct > 20 ? '#ef4444' : wastePct > 10 ? '#f59e0b' : '#10b981';
+    // Lecture Hall temperature — live from Firebase environment.temperature
+    const tempC   = sensorState?.Large_Lecture_Hall?.temperature_c ?? null;
+    const fanSpeed = sensorState?.Large_Lecture_Hall?.fan_speed_pct ?? null;
+
+    // Classroom 2 lux — live from Firebase environment.ambient
+    const lux = sensorState?.Classroom_2?.lux ?? null;
 
     return (
         <div className="rounded-2xl p-4 flex flex-col gap-3"
              style={{ background: bg, border, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: textMuted }}>
                     Today's Energy
                 </p>
-                {isLive && (
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Live
-          </span>
-                )}
+                <span className="flex items-center gap-1 text-[9px] font-bold"
+                      style={{ color: isLive ? '#10b981' : textMuted }}>
+          <span className="w-1.5 h-1.5 rounded-full"
+                style={{ background: isLive ? '#10b981' : '#475569',
+                    animation: isLive ? 'pulse 2s infinite' : 'none' }} />
+                    {isLive ? 'Live' : 'No data'}
+        </span>
             </div>
 
-            {/* Main energy number — live powerDraw if available */}
+            {/* Power draw — live from energy.powerDraw */}
             <div>
-                {isLive ? (
-                    <>
-                        <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                            {livePowerStr}
-                            <span className="text-sm font-normal ml-1" style={{ color: textMuted }}>now</span>
-                        </p>
-                        <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>
-                            from energy.powerDraw · Node 1
-                        </p>
-                    </>
-                ) : (
-                    <>
-                        <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                            {kpi.energyToday_kwh ?? DATASET_CAMPUS_KPIS.total_energy_kwh}
-                            <span className="text-base font-normal ml-1" style={{ color: textMuted }}>kWh</span>
-                        </p>
-                        <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>dataset reference · no live data</p>
-                    </>
-                )}
+                <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
+                    {powerStr}
+                </p>
+                <p className="text-[11px] mt-0.5" style={{ color: textMuted }}>
+                    {isLive ? 'Node 1 · energy.powerDraw' : 'waiting for uplink'}
+                </p>
             </div>
 
-            {/* Waste */}
-            <div className="rounded-xl p-3" style={{ background:`${wasteColor}12`, border:`1px solid ${wasteColor}30` }}>
-                <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: wasteColor }}>
-                        Energy Wasted
-                    </p>
-                    <p className="text-sm font-bold" style={{ color: wasteColor, fontFamily:"'DM Mono',monospace" }}>
-                        {wastePct}%
-                    </p>
+            {/* Live sensor snapshot */}
+            <div className="space-y-2 pt-2 border-t"
+                 style={{ borderColor: '#eef0f4' }}>
+                <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: textMuted }}>
+                    Live Readings
+                </p>
+
+                {/* CR2 lux */}
+                <div className="rounded-xl px-3 py-2 flex items-center justify-between" style={{ background: metricBg }}>
+                    <span className="text-[10px]" style={{ color: textMuted }}>Classroom 2 · Lux</span>
+                    <span className="text-[11px] font-bold" style={{ color: lux != null ? (lux < 80 ? '#f59e0b' : '#10b981') : textMuted,
+                        fontFamily:"'DM Mono',monospace" }}>
+            {lux != null ? `${lux} lx` : '—'}
+          </span>
                 </div>
-                <p className="text-lg font-bold" style={{ color: wasteColor, fontFamily:"'DM Mono',monospace" }}>
-                    {kpi.wasteToday_kwh ?? DATASET_CAMPUS_KPIS.total_waste_kwh}
-                    <span className="text-sm font-normal ml-1" style={{ color: wasteColor, opacity:0.7 }}>kWh</span>
-                </p>
-                <p className="text-[10px] mt-1" style={{ color: wasteColor, opacity:0.7 }}>
-                    Lights/HVAC on in empty rooms
-                </p>
-            </div>
 
-            {/* Outdoor temp */}
-            <div className="flex items-center justify-between pt-1 border-t"
-                 style={{ borderColor: dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }}>
-                <p className="text-[11px]" style={{ color: textMuted }}>Outdoor temp</p>
-                <p className="text-sm font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                    {DATASET_CAMPUS_KPIS.outdoor_temp_c ?? 34}°C
-                </p>
+                {/* LH temperature */}
+                <div className="rounded-xl px-3 py-2 flex items-center justify-between" style={{ background: metricBg }}>
+                    <span className="text-[10px]" style={{ color: textMuted }}>Hall · Temp</span>
+                    <span className="text-[11px] font-bold"
+                          style={{ color: tempC != null ? (tempC > 35 ? '#ef4444' : tempC > 28 ? '#f59e0b' : '#10b981') : textMuted,
+                              fontFamily:"'DM Mono',monospace" }}>
+            {tempC != null ? `${tempC.toFixed(1)}°C` : '—'}
+          </span>
+                </div>
+
+                {/* LH fan */}
+                {fanSpeed != null && (
+                    <div className="rounded-xl px-3 py-2 flex items-center justify-between" style={{ background: metricBg }}>
+                        <span className="text-[10px]" style={{ color: textMuted }}>Hall · Fan</span>
+                        <span className="text-[11px] font-bold"
+                              style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
+              {fanSpeed}%
+            </span>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -396,12 +402,12 @@ function OccupancySpikePanel({ sensorState, dark }) {
     const hasSpike = spikes.some(s => s.isSpiking);
     const hasPred  = spikes.some(s => s.forecast !== null);
 
-    const bg     = dark ? 'rgba(8,12,22,0.98)' : '#ffffff';
-    const border = dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0';
-    const text   = dark ? '#f1f5f9' : '#0f172a';
-    const muted  = dark ? '#475569' : '#94a3b8';
-    const subtle = dark ? 'rgba(255,255,255,0.04)' : '#f8fafc';
-    const subtleBorder = dark ? 'rgba(255,255,255,0.06)' : '#f1f5f9';
+    const bg     = '#ffffff';
+    const border = '1px solid #e2e8f0';
+    const text   = '#0f172a';
+    const muted  = '#94a3b8';
+    const subtle = '#f8fafc';
+    const subtleBorder = '#f1f5f9';
 
     // Global status badge
     const statusBadge = hasAlert
@@ -470,8 +476,8 @@ function OccupancySpikePanel({ sensorState, dark }) {
                             ? (node.sensor.lux != null ? `${node.sensor.lux} LX` : '— LX')
                             : (node.sensor.temperature_c != null ? `${node.sensor.temperature_c.toFixed(1)}C` : '—');
 
-                    const rowBg = node.hasFireAlert ? (dark ? 'rgba(239,68,68,0.07)' : 'rgba(239,68,68,0.04)')
-                        : node.isSpiking  ? (dark ? 'rgba(245,158,11,0.06)' : 'rgba(245,158,11,0.03)')
+                    const rowBg = node.hasFireAlert ? 'rgba(239,68,68,0.05)'
+                        : node.isSpiking  ? 'rgba(245,158,11,0.04)'
                             : 'transparent';
 
                     return (
@@ -533,7 +539,7 @@ function OccupancySpikePanel({ sensorState, dark }) {
                                             color: conf > 80 ? '#10b981' : '#f59e0b' }}>{conf}%</span>
                                     </div>
                                     <div style={{ height:3, borderRadius:2,
-                                        background: dark ? 'rgba(255,255,255,0.06)' : '#f1f5f9' }}>
+                                        background: '#f1f5f9' }}>
                                         <div style={{ height:'100%', borderRadius:2,
                                             width:`${conf}%`,
                                             background: conf > 80 ? '#10b981' : '#f59e0b',
@@ -559,7 +565,7 @@ export default function Dashboard() {
     const navigate    = useNavigate();
     const [selectedRoom, setSelectedRoom] = useState(null);
     const [activeTab,    setActiveTab]    = useState('dashboard');
-    const { dark } = useTheme();
+    const dark = false; // Light mode forced
 
     const { sensorState, campusTime, isLive } = useLiveSensorState();
     const liveKPI   = computeCampusKPIs(sensorState);
@@ -575,10 +581,10 @@ export default function Dashboard() {
     const warnCount   = ALERTS.filter(a => a.severity === 'warning').length;
 
     // Theme colours
-    const pageBg     = dark ? '#0d0f14' : '#f0f4ff';
-    const textPrimary  = dark ? '#f1f5f9' : '#0f172a';
-    const textSecondary = dark ? 'rgba(255,255,255,0.4)' : 'rgba(15,23,42,0.45)';
-    const gridColor  = dark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.04)';
+    const pageBg     = '#f5f7fa';  // Light mode: warm off-white
+    const textPrimary  = '#0f172a';
+    const textSecondary = 'rgba(15,23,42,0.45)';
+    const gridColor  = 'rgba(99,115,140,0.07)';
 
     return (
         <div className="-m-5 flex flex-col" style={{ minHeight:'calc(100vh - 3.5rem)', background: pageBg }}>
@@ -593,7 +599,7 @@ export default function Dashboard() {
             <div className="relative z-10 flex flex-col flex-1 gap-4 p-6">
 
                 {/* ── Tab navigation ──────────────────────────────────────────── */}
-                <div className="flex border-b" style={{ borderColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)' }}>
+                <div className="flex border-b" style={{ borderColor: 'rgba(15,23,42,0.1)' }}>
                     {[
                         { id:'dashboard',  label:'Live Dashboard', icon:'⬡' },
                         { id:'ai',         label:'AI Predictions',  icon:'◈' },
@@ -603,11 +609,11 @@ export default function Dashboard() {
                                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-all"
                                 style={{
                                     borderBottom: activeTab === tab.id
-                                        ? `2px solid ${dark ? '#f1f5f9' : '#0f172a'}`
+                                        ? '2px solid #0f172a'
                                         : '2px solid transparent',
                                     color: activeTab === tab.id
-                                        ? (dark ? '#f1f5f9' : '#0f172a')
-                                        : (dark ? 'rgba(255,255,255,0.35)' : 'rgba(15,23,42,0.4)'),
+                                        ? '#0f172a'
+                                        : 'rgba(15,23,42,0.4)',
                                 }}>
                             {tab.icon} {tab.label}
                         </button>
@@ -644,9 +650,9 @@ export default function Dashboard() {
                             <div className="flex items-center gap-2">
                                 <button onClick={() => navigate('/alerts')}
                                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-                                        style={{ background: critCount > 0 ? 'rgba(239,68,68,0.12)' : dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+                                        style={{ background: critCount > 0 ? 'rgba(239,68,68,0.1)' : '#f0f2f5',
                                             color: critCount > 0 ? '#ef4444' : textSecondary,
-                                            border: `1px solid ${critCount > 0 ? 'rgba(239,68,68,0.3)' : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}` }}>
+                                            border: `1px solid ${critCount > 0 ? 'rgba(239,68,68,0.3)' : '#e2e8f0'}` }}>
                                     <Icon name="alerts" className="w-4 h-4" />
                                     {critCount + warnCount > 0 ? `${critCount + warnCount} Alert${critCount + warnCount > 1 ? 's' : ''}` : 'No Alerts'}
                                 </button>
@@ -711,8 +717,8 @@ export default function Dashboard() {
                             <div className="flex-1 relative rounded-2xl overflow-hidden" style={{ minHeight: 460 }}>
                                 <Suspense fallback={
                                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl"
-                                         style={{ background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)',
-                                             border: dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)' }}>
+                                         style={{ background: '#eef0f4',
+                                             border: '1px solid rgba(0,0,0,0.07)' }}>
                                         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                                         <p className="text-sm font-semibold" style={{ color: textSecondary }}>Loading 3D Model…</p>
                                     </div>
@@ -729,41 +735,17 @@ export default function Dashboard() {
                                 {/* Subtle label */}
                                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
                                     <p className="text-[10px] font-semibold px-3 py-1.5 rounded-full"
-                                       style={{ background: dark ? 'rgba(13,15,20,0.8)' : 'rgba(255,255,255,0.85)',
+                                       style={{ background: 'rgba(255,255,255,0.92)',
                                            color: textSecondary,
-                                           border: dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)' }}>
+                                           border: '1px solid rgba(0,0,0,0.07)' }}>
                                         Click any room for details · Drag to orbit · Scroll to zoom
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Right — energy summary + total occupancy */}
+                            {/* Right — energy summary */}
                             <div className="flex flex-col gap-3 shrink-0" style={{ width: 220 }}>
                                 <EnergySummary kpi={KPI} sensorState={sensorState} dark={dark} />
-
-                                {/* Total occupancy */}
-                                <div className="rounded-2xl p-4"
-                                     style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)',
-                                         border: dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)',
-                                         boxShadow:'0 2px 12px rgba(0,0,0,0.08)' }}>
-                                    <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: textSecondary }}>
-                                        Total Occupancy
-                                    </p>
-                                    <p className="text-3xl font-bold" style={{ color: textPrimary, fontFamily:"'DM Mono',monospace" }}>
-                                        {KPI.totalOccupancy}
-                                        <span className="text-base font-normal ml-1" style={{ color: textSecondary }}>
-                  / {KPI.maxOccupancy ?? 135}
-                </span>
-                                    </p>
-                                    <div className="mt-2 h-2 rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
-                                        <div className="h-full rounded-full transition-all"
-                                             style={{ width:`${KPI.occupancyPct}%`,
-                                                 background: KPI.occupancyPct > 85 ? '#ef4444' : KPI.occupancyPct > 60 ? '#f59e0b' : '#10b981' }} />
-                                    </div>
-                                    <p className="text-[11px] mt-1" style={{ color: textSecondary }}>
-                                        {KPI.occupancyPct}% of total capacity
-                                    </p>
-                                </div>
 
                                 {/* Navigate to analytics */}
                                 <button onClick={() => navigate('/analytics')}
@@ -791,8 +773,8 @@ export default function Dashboard() {
                                 <button key={action.path}
                                         onClick={() => navigate(action.path)}
                                         className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all hover:opacity-80"
-                                        style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.9)',
-                                            border: dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)',
+                                        style={{ background: '#ffffff',
+                                            border: '1px solid #e8ecf0',
                                             color: action.color }}>
                                     <Icon name={action.icon} className="w-4 h-4" />
                                     {action.label}
