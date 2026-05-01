@@ -15,7 +15,6 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '../components/panels/Icon';
 import { useTheme } from '../context/ThemeContext';
 import { DATASET_CAMPUS_KPIS, computeDatasetKPIs } from '../services/datasetState';
-import AIPredictionPanel from './AIPredictionPanel';
 import SimulationTab     from './SimulationTab';
 import { subscribeToRooms, subscribeToPredictions } from '../services/firebase';
 import { useLiveSensorState, computeCampusKPIs, deriveAlerts } from '../services/sensorState';
@@ -47,7 +46,7 @@ const NODES = [
         label:    'Multipurpose Hall',
         node:     3,
         type:     'DHT Temp + PIR + Fire Sim + Fan',
-        capacity: 75,
+        capacity: 100,
         icon:     'temperature',
         color:    '#10b981',
     },
@@ -359,8 +358,6 @@ function EnergySummary({ kpi, sensorState, dark }) {
 
 // ── Occupancy Spike Prediction Panel ─────────────────────────────────────────
 const SPIKE_NODES = [
-    { dashId:'Classroom_1',        fbId:'classroom-1',  label:'Classroom A', node:1, color:'#3b82f6' },
-    { dashId:'Classroom_2',        fbId:'classroom-2',  label:'Classroom B', node:2, color:'#f59e0b' },
     { dashId:'Large_Lecture_Hall', fbId:'lecture-hall', label:'Multipurpose Hall', node:3, color:'#f87171' },
 ];
 
@@ -386,13 +383,24 @@ function OccupancySpikePanel({ sensorState, dark }) {
             : node.dashId === 'Classroom_2' ? (sensor.lux ?? 0) > 50
                 : (sensor.temperature_c ?? 0) > 0;
 
-        const forecast     = pred?.forecast_30min ?? null;
-        const confidence   = pred?.confidence ?? null;
+        // Only lecture-hall has a prediction from predict.py
+        // Classroom 1 & 2 show live sensor only — no forecast
+        let forecast   = null;
+        let confidence = null;
+
+        if (node.fbId === 'lecture-hall') {
+            if (pred?.spike_in_30min != null) {
+                forecast   = pred.spike_in_30min === 1 ? 'OCCUPIED' : 'EMPTY';
+                confidence = null;
+            }
+        }
+        // CR1 and CR2: forecast stays null — no prediction displayed
+
         const alerts       = pred?.alerts ?? [];
         const hasFireAlert = sensor.fire_alert || alerts.includes('FIRE_ANOMALY');
         const hasPowerLeak = alerts.includes('POWER_LEAK');
-        const isSpiking    = !isOccupiedNow && forecast === 'OCCUPIED';
-        const isWaste      = isOccupiedNow  && forecast === 'EMPTY';
+        const isSpiking    = node.fbId === 'lecture-hall' && !isOccupiedNow && forecast === 'OCCUPIED';
+        const isWaste      = node.fbId === 'lecture-hall' && isOccupiedNow  && forecast === 'EMPTY';
 
         return { ...node, sensor, pred, isOccupiedNow, forecast, confidence,
             isSpiking, isWaste, hasFireAlert, hasPowerLeak };
@@ -400,7 +408,7 @@ function OccupancySpikePanel({ sensorState, dark }) {
 
     const hasAlert = spikes.some(s => s.hasFireAlert || s.hasPowerLeak);
     const hasSpike = spikes.some(s => s.isSpiking);
-    const hasPred  = spikes.some(s => s.forecast !== null);
+    const hasPred  = predictions['lecture-hall']?.spike_in_30min != null;
 
     const bg     = '#ffffff';
     const border = '1px solid #e2e8f0';
@@ -433,8 +441,8 @@ function OccupancySpikePanel({ sensorState, dark }) {
                     </p>
                     <p style={{ fontSize:9, color:muted, margin:'2px 0 0', letterSpacing:'0.04em' }}>
                         {hasPred
-                            ? `AI model · inference.py · last updated ${lastUpdate?.toLocaleTimeString() ?? '—'}`
-                            : 'Start inference.py on your laptop to see live predictions'}
+                            ? `predict.py · last updated ${lastUpdate?.toLocaleTimeString() ?? '—'}`
+                            : 'Run predict.py to see live predictions'}
                     </p>
                 </div>
                 {statusBadge && (
@@ -448,7 +456,7 @@ function OccupancySpikePanel({ sensorState, dark }) {
             </div>
 
             {/* Node rows */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)',
+            <div style={{ display:'grid', gridTemplateColumns:'1fr',
                 gap:0, padding:'0' }}>
                 {spikes.map((node, i) => {
                     const conf  = node.confidence != null ? Math.round(node.confidence * 100) : null;
@@ -500,9 +508,9 @@ function OccupancySpikePanel({ sensorState, dark }) {
                 </span>
                             </div>
 
-                            {/* Now → forecast */}
+                            {/* Now → forecast (lecture-hall only) / live sensor only for classrooms */}
                             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                                {/* Now */}
+                                {/* Now — always shown */}
                                 <div style={{ flex:1, background:subtle, border:`1px solid ${subtleBorder}`,
                                     borderRadius:6, padding:'6px 8px' }}>
                                     <p style={{ fontSize:8, color:muted, margin:'0 0 2px', letterSpacing:'0.08em' }}>NOW</p>
@@ -513,43 +521,47 @@ function OccupancySpikePanel({ sensorState, dark }) {
                                     </p>
                                 </div>
 
-                                {/* Arrow */}
-                                <div style={{ fontSize:10, color:muted, flexShrink:0 }}>+30m</div>
-
-                                {/* Forecast */}
-                                <div style={{ flex:1, background:subtle, border:`1px solid ${subtleBorder}`,
-                                    borderRadius:6, padding:'6px 8px',
-                                    borderColor: node.isSpiking || node.hasFireAlert
-                                        ? rowAccent + '66' : subtleBorder }}>
-                                    <p style={{ fontSize:8, color:muted, margin:'0 0 2px', letterSpacing:'0.08em' }}>FORECAST</p>
-                                    <p style={{ fontSize:11, fontWeight:700, margin:0,
-                                        fontFamily:"'DM Mono',monospace",
-                                        color: rowAccent }}>
-                                        {statusText}
-                                    </p>
-                                </div>
+                                {/* Arrow + Forecast — only for lecture-hall */}
+                                {node.fbId === 'lecture-hall' && (
+                                    <>
+                                        <div style={{ fontSize:10, color:muted, flexShrink:0 }}>+30m</div>
+                                        <div style={{ flex:1, background:subtle, border:`1px solid ${subtleBorder}`,
+                                            borderRadius:6, padding:'6px 8px',
+                                            borderColor: node.isSpiking ? rowAccent + '66' : subtleBorder }}>
+                                            <p style={{ fontSize:8, color:muted, margin:'0 0 2px', letterSpacing:'0.08em' }}>FORECAST</p>
+                                            <p style={{ fontSize:11, fontWeight:700, margin:0,
+                                                fontFamily:"'DM Mono',monospace",
+                                                color: rowAccent }}>
+                                                {statusText}
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
-                            {/* Confidence bar */}
-                            {conf != null ? (
-                                <div>
-                                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
-                                        <span style={{ fontSize:8, color:muted, letterSpacing:'0.06em' }}>CONFIDENCE</span>
-                                        <span style={{ fontSize:9, fontWeight:700, fontFamily:"'DM Mono',monospace",
-                                            color: conf > 80 ? '#10b981' : '#f59e0b' }}>{conf}%</span>
+                            {/* Spike indicator — lecture-hall only */}
+                            {node.fbId === 'lecture-hall' && (
+                                node.pred?.spike_in_30min != null ? (
+                                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                                        background: node.pred.spike_in_30min === 1
+                                            ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.06)',
+                                        border: `1px solid ${node.pred.spike_in_30min === 1
+                                            ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.2)'}`,
+                                        borderRadius:6, padding:'5px 8px' }}>
+                    <span style={{ fontSize:8, color:muted, letterSpacing:'0.08em' }}>
+                      SPIKE IN 30 MIN
+                    </span>
+                                        <span style={{ fontSize:11, fontWeight:800,
+                                            fontFamily:"'DM Mono',monospace",
+                                            color: node.pred.spike_in_30min === 1 ? '#f59e0b' : '#10b981' }}>
+                      {node.pred.spike_in_30min === 1 ? 'YES' : 'NO'}
+                    </span>
                                     </div>
-                                    <div style={{ height:3, borderRadius:2,
-                                        background: '#f1f5f9' }}>
-                                        <div style={{ height:'100%', borderRadius:2,
-                                            width:`${conf}%`,
-                                            background: conf > 80 ? '#10b981' : '#f59e0b',
-                                            transition:'width 0.5s' }} />
-                                    </div>
-                                </div>
-                            ) : (
-                                <p style={{ fontSize:9, color:muted, margin:0, fontStyle:'italic' }}>
-                                    Awaiting inference.py
-                                </p>
+                                ) : (
+                                    <p style={{ fontSize:9, color:muted, margin:0, fontStyle:'italic' }}>
+                                        Run predict.py
+                                    </p>
+                                )
                             )}
                         </div>
                     );
@@ -602,8 +614,7 @@ export default function Dashboard() {
                 <div className="flex border-b" style={{ borderColor: 'rgba(15,23,42,0.1)' }}>
                     {[
                         { id:'dashboard',  label:'Live Dashboard', icon:'⬡' },
-                        { id:'ai',         label:'AI Predictions',  icon:'◈' },
-                        { id:'simulation', label:'Simulation',      icon:'◷' },
+                        { id:'simulation', label:'Simulator',       icon:'◈' },
                     ].map(tab => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-all"
@@ -621,13 +632,6 @@ export default function Dashboard() {
                 </div>
 
                 {/* ── AI Predictions tab ─────────────────────────────────────── */}
-                {activeTab === 'ai' && (
-                    <div className="bg-white rounded-2xl p-6" style={{ boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-                        <AIPredictionPanel />
-                    </div>
-                )}
-
-                {/* ── Simulation tab ──────────────────────────────────────────── */}
                 {activeTab === 'simulation' && <SimulationTab />}
 
                 {/* ── Main dashboard content ──────────────────────────────────── */}
