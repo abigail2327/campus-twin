@@ -1,40 +1,312 @@
-# SmartTwin — Smart Campus Digital Twin
+<div align="center">
 
-> Real-time IoT monitoring and control dashboard for RIT Dubai's campus building.
-> Built as a capstone project connecting physical Arduino/Raspberry Pi sensor nodes to an interactive 3D web dashboard via Firebase.
+<img src="https://img.shields.io/badge/RIT%20Dubai-Capstone%202026-CC0000?style=for-the-badge" />
+<img src="https://img.shields.io/badge/Energy%20Saved-48.2%25-00C896?style=for-the-badge" />
+<img src="https://img.shields.io/badge/AI%20Accuracy-89%25%20F1-6366F1?style=for-the-badge" />
 
----
+# SmartTwin
+## Smart Campus Digital Twin for Energy & Sustainability
 
-## Live Stats
-
-| Rooms Monitored | IoT Nodes | Dashboard Pages | Dataset Rows |
-|:-:|:-:|:-:|:-:|
-| 9 | 6 | 8 | 235,881 |
+*A fully actuated Cyber-Physical System that proactively predicts and shapes energy usage through autonomous, closed-loop optimization.*
 
 ---
 
-## Table of Contents
+[![React](https://img.shields.io/badge/React_18-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![Three.js](https://img.shields.io/badge/Three.js_WebGL-black?style=flat-square&logo=three.js)](https://threejs.org)
+[![Firebase](https://img.shields.io/badge/Firebase_RTDB-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com)
+[![Python](https://img.shields.io/badge/Python_3.x-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![XGBoost](https://img.shields.io/badge/XGBoost-FF6600?style=flat-square)](https://xgboost.readthedocs.io)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white)](https://scikit-learn.org)
+[![LoRaWAN](https://img.shields.io/badge/LoRaWAN-TTN-4B0082?style=flat-square)](https://www.thethingsnetwork.org)
+[![Eclipse Ditto](https://img.shields.io/badge/Eclipse_Ditto-2C2255?style=flat-square)](https://eclipse.dev/ditto)
 
-- [Overview](#overview)
-- [Tech Stack](#tech-stack)
-- [System Architecture](#system-architecture)
-- [IoT Nodes & Sensors](#iot-nodes--sensors)
-- [Dashboard Pages](#dashboard-pages)
-- [Project Structure](#project-structure)
-- [Setup & Installation](#setup--installation)
-- [Firebase Configuration](#firebase-configuration)
-- [Seeding the Database](#seeding-the-database)
-- [Raspberry Pi Integration](#raspberry-pi-integration)
-- [Development Phases](#development-phases)
-- [Security](#security)
+</div>
 
 ---
 
-## Overview
+## What is SmartTwin
 
-SmartTwin is a digital twin of the RIT Dubai mini-campus building. It connects six IoT Arduino nodes (classrooms, lecture hall, computer lab, faculty office, mechanical room) through a Raspberry Pi gateway to Firebase Realtime Database, which the React dashboard subscribes to in real time.
+SmartTwin is a low-cost, modular Smart Campus Digital Twin developed as a Senior Capstone Project at RIT Dubai. It integrates real-time IoT sensor data from three Arduino MKR WAN 1310 nodes with an AI-driven inference engine and a live Three.js WebGL dashboard — all synchronized through Firebase Realtime Database via Eclipse Ditto.
 
-The centrepiece is an interactive Three.js 3D model of the actual building — photorealistic exterior, transparent walls showing interiors, room colours driven by live sensor status, animated HVAC dampers and fans, and 30 individual computer workstations in the lab that glow green (in use) or red (idle).
+The system moves beyond passive monitoring to implement **fully actuated, closed-loop control** of lighting and HVAC systems, while providing 30-minute occupancy forecasting, fire spike anomaly detection, and energy theft detection.
+
+It directly supports the **UAE Net-Zero 2050 initiative** and **Dubai's Clean Energy Strategy**.
+
+---
+
+## Validated Results
+
+| Metric | Target | Achieved |
+|---|---|---|
+| Energy reduction vs baseline | 20–25% | **48.2%** |
+| AI model accuracy (F1-score) | > 85% | **89%** |
+| Fire spike detection rate | — | **95% TPR** |
+| Energy theft detection rate | — | **96% TPR** |
+| End-to-end pipeline latency | < 3 seconds | **< 3 seconds** |
+| LoRaWAN packet delivery | > 95% | **> 95%** |
+| Daily energy saving | — | **41.04 kWh/day** |
+
+---
+
+## System Architecture
+
+```
+  [Arduino Node 1]  [Arduino Node 2]  [Arduino Node 3]
+   PIR / INA219      LDR Ambient       DHT / Pot / Fan
+        |                 |                  |
+        +------------ LoRa Radio ------------+
+                          |
+               The Things Network (TTN)
+                          |
+                   MQTT / Mosquitto
+                          |
+                   Eclipse Ditto
+               (reported vs desired state)
+                          |
+               Firebase Realtime Database
+                /                    \
+        predict.py               React Dashboard
+        (every 15 min)           Three.js 3D model
+        XGBoost + RF             Live sensor uplink
+              |                        |
+        /predictions/*    Spike panel + power graph
+```
+
+---
+
+## Nodes
+
+| Node | Room | Sensors | Function |
+|---|---|---|---|
+| **Node 1** | Classroom A | PIR motion · INA219 power | Occupancy detection · power metering |
+| **Node 2** | Classroom B | LDR ambient light | Adaptive LED dimming via daylight harvesting |
+| **Node 3** | Multipurpose Hall | DHT temperature · potentiometer | HVAC Cube Law control · fire spike detection · 30-min occupancy forecast |
+
+---
+
+## Repository Structure
+
+```
+smarttwin/
+|
+├── campus-twin/                    # React + Vite frontend
+|   ├── src/
+|   |   ├── pages/
+|   |   |   ├── Dashboard.jsx       # Live dashboard — uplink + spike panel + power graph
+|   |   |   ├── SimulationTab.jsx   # Simulator — trained data + inline AI predictions
+|   |   |   ├── ScheduleManager.jsx # Upload timetable Excel → Firebase schedule/*
+|   |   |   ├── Alerts.jsx
+|   |   |   ├── Analytics.jsx
+|   |   |   └── OntologyGraph.jsx
+|   |   ├── components/panels/
+|   |   |   ├── BuildingTwin3D.jsx  # Three.js WebGL 3D building model
+|   |   |   └── PowerGraph.jsx      # Live INA219 power consumption chart
+|   |   ├── services/
+|   |   |   ├── firebase.js         # Subscriptions + mapFirebaseRoom()
+|   |   |   ├── sensorState.js      # useLiveSensorState() hook
+|   |   |   └── trainedSimData.js   # Pre-aggregated CSV for simulator
+|   |   └── context/
+|   |       └── ThemeContext.jsx
+|   ├── .env.local.example
+|   └── package.json
+|
+├── smartcampus-ai/                 # Python AI and bridge layer
+|   ├── inference.py                # AI brain — pure function, no Firebase, no loop
+|   ├── predict.py                  # Glue — reads Firebase, runs model, writes predictions
+|   ├── train.py                    # Train XGBoost + Random Forest ensemble
+|   ├── bridge.py                   # TTN MQTT → Mosquitto → Eclipse Ditto bridge
+|   ├── firebase_sync.py            # Eclipse Ditto → Firebase sync
+|   ├── classroom_downlink.py       # Downlink commands → Classroom nodes
+|   ├── d_to_t.py                   # Downlink commands → Hall node
+|   ├── downlink_schedule.py        # Timetable-based class_active downlink
+|   ├── reset_ditto.py              # Reset stale Ditto state (run before cold start)
+|   ├── model/
+|   |   └── building_brain_v2.pkl   # Trained ensemble — not in repo, run train.py
+|   └── data/
+|       └── campus_sensor_data_v2.csv  # 17,280-row training dataset
+|
+└── README.md
+```
+
+---
+
+## Dashboard
+
+### Live Dashboard
+- **3D building model** — Three.js WebGL, colour-coded room states, click any room for live sensor panel
+- **30-min occupancy spike panel** — reads `predictions/lecture-hall/spike_in_30min` from Firebase (written by `predict.py`)
+- **Live power graph** — streams `energy.powerDraw` from Firebase in real time (INA219, Node 1)
+- **Node cards** — Classroom A (binary PIR), Classroom B (ambient lux), Multipurpose Hall (temperature)
+
+### Simulator tab
+- Interactive 24h timeline — click or scrub any hour to see trained occupancy from `campus_sensor_data_v2.csv`
+- Day selector Mon–Fri, play/pause with 1x–8x speed
+- Per-room AI prediction cards — live from `/predictions/*` when `predict.py` is running
+- Manual override controls (binary toggle for PIR rooms, headcount slider for Hall)
+
+### Schedule Manager
+- Drag and drop `.xlsx` timetable → parsed → pushed to `schedule/{roomId}/slots` in Firebase
+- `predict.py` reads `schedule/*` every cycle to determine `class_scheduled` input feature
+- Accepted columns: `room`, `seconds_from_start`, `scheduled` (or `day`/`start`/`end`/`course`)
+
+---
+
+## Firebase Schema
+
+```json
+{
+  "twinergy": {
+    "rooms": {
+      "classroom-1": {
+        "occupancy": { "pir": 0, "actual": false },
+        "lighting":  { "light": 65, "status": "off" },
+        "energy":    { "powerDraw": 2327 }
+      },
+      "classroom-2": {
+        "environment": { "ambient": 504, "brightness": 151, "css": true }
+      },
+      "lecture-hall": {
+        "environment": { "temperature": 22, "fireDetected": false, "campusMode": "AUTO" },
+        "occupancy":   { "actual": 100 },
+        "energy":      { "fanSpeed": 100 }
+      }
+    }
+  },
+  "predictions": {
+    "lecture-hall": { "spike_in_30min": 1, "predicted_at": "2026-05-01T12:38:57" }
+  },
+  "schedule": {
+    "classroom-1": {
+      "slots": {
+        "slot_0": { "day": 1, "start": 900, "end": 955, "course": "CS-101" }
+      }
+    }
+  }
+}
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.10+
+- Docker (Eclipse Ditto)
+- Mosquitto MQTT broker
+- The Things Network account — 3 devices registered
+- Firebase project with Realtime Database enabled
+
+### Frontend
+
+```bash
+cd campus-twin
+npm install three @react-three/fiber @react-three/drei
+npm install firebase react-router-dom tailwindcss xlsx
+
+cp .env.local.example .env.local
+# Fill in your Firebase credentials
+
+npm run dev
+# Open http://localhost:5173
+```
+
+### Python
+
+```bash
+cd smartcampus-ai
+pip install firebase-admin pandas joblib xgboost scikit-learn
+
+# Mac only — required before xgboost can load
+brew install libomp
+
+# Get your service account key:
+# Firebase Console → Project Settings → Service Accounts → Generate new private key
+# Save as: smartcampus-ai/serviceAccountKey.json
+```
+
+### Environment Variables
+
+Create `campus-twin/.env.local`:
+
+```env
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+> Never commit `.env.local` or `serviceAccountKey.json`. Both are in `.gitignore`.
+
+---
+
+## Cold Start Sequence
+
+Run each step in a separate terminal, keep all running simultaneously:
+
+```bash
+# 1 — Start Eclipse Ditto
+cd ~/ditto-official/deployment/
+docker compose up -d
+
+# 2 — Start Mosquitto
+mosquitto -c /etc/mosquitto/mosquitto.conf
+
+# 3 — LoRa packet forwarder (on Raspberry Pi)
+ssh campususer@<pi_ip>
+sudo ./lora_pkt_fwd
+
+# 4 — TTN → Mosquitto → Ditto bridge
+python3 bridge.py
+
+# 5 — Ditto → Firebase sync
+python3 firebase_sync.py
+
+# 6 — Downlink scripts
+python3 d_to_t.py               # Multipurpose Hall
+python3 classroom_downlink.py   # Classrooms 1 and 2
+
+# 7 — Schedule simulator
+python3 downlink_schedule.py
+
+# 8 — Reset stale Ditto state (run once on each cold start)
+python3 reset_ditto.py
+
+# 9 — AI predictions (runs every 15 minutes)
+python3 predict.py
+
+# 10 — Frontend dashboard
+cd campus-twin && npm run dev
+```
+
+---
+
+## AI Model
+
+The Building Brain is an **XGBoost + Random Forest VotingClassifier** trained on 17,280 synthetic records modelled after the RIT Dubai timetable and UAE climate patterns.
+
+```bash
+# Retrain the model
+cd smartcampus-ai
+python3 train.py
+# Outputs: model/building_brain_v2.pkl
+```
+
+**Occupancy detection rules — identical in `train.py` and `predict.py`:**
+
+```
+Classroom_1  →  pir_motion > 0
+Classroom_2  →  lux_bh1750 > 50
+Lecture_Hall →  potentiometer > 20
+```
+
+**Features:** `hour` · `day_of_week` · `class_scheduled` · `ina219_power_ma` · room one-hot encoding · `occ_lag_1/2/3` (15 / 30 / 45 min history)
+
+> `building_brain_v2.pkl` is excluded from the repository due to file size. Run `train.py` to regenerate it, or request it from the project team.
 
 ---
 
@@ -42,379 +314,44 @@ The centrepiece is an interactive Three.js 3D model of the actual building — p
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + Vite |
-| Styling | Tailwind CSS v3 |
-| 3D Model | Three.js + @react-three/fiber + @react-three/drei |
-| Charts | D3.js |
-| Auth | Firebase Authentication (Email/Password) |
-| Database | Firebase Realtime Database |
-| IoT Hardware | Arduino Nodes + Raspberry Pi gateway |
-| Power Monitoring | INA219 (on 12V bus, per room) |
-| Font | DM Sans + DM Mono |
+| Frontend framework | React 18, Vite |
+| Styling | Tailwind CSS |
+| 3D visualization | Three.js, @react-three/fiber, @react-three/drei |
+| Realtime database | Firebase Realtime Database |
+| Digital twin middleware | Eclipse Ditto |
+| MQTT broker | Mosquitto |
+| LoRaWAN network | The Things Network (TTN) v3 |
+| Edge hardware | Arduino MKR WAN 1310 |
+| Edge gateway | Raspberry Pi 5 |
+| AI / ML | XGBoost, scikit-learn Random Forest |
+| Data pipeline | pandas, numpy, joblib |
+| Server-side Firebase | firebase-admin (Python) |
+| Excel parsing | SheetJS (xlsx) |
 
 ---
 
-## System Architecture
+## Security Notes
 
-```
-[Arduino Node 1–6]
-  PIR / lux / temp / CO₂ / INA219 / servo / fan
-        |
-        | serial / MQTT
-        ↓
-[Raspberry Pi — Edge Gateway]
-  reads sensor packets → writes /telemetry/{roomId} to Firebase
-  reads /signals/{roomId} from Firebase → forwards to Arduino
-        |
-        | Firebase Realtime Database
-        ↓
-[React Dashboard]
-  useLiveSensorState() hook → onValue() subscription
-  renders 3D model, KPI cards, alerts, charts
-  writes /signals/{roomId} when operator sends a command
-```
-
-### Firebase Database Schema
-
-```
-/telemetry/{roomId}     ← live sensor readings (written by Raspberry Pi)
-/signals/{roomId}       ← DT→Node commands (written by dashboard)
-/campus_clock           ← simulated campus time, HHMM integer (e.g. 1430 = 14:30)
-/alerts                 ← active alert log with severity, node, timestamp
-```
+- All LoRaWAN communication uses native AES-128 encryption
+- Firebase security rules restrict write access by path (`reported` vs `desired` state)
+- Each Arduino node has unique TTN credentials (DevEUI / AppKey)
+- Service account keys and `.env.local` are excluded from version control via `.gitignore`
+- No personally identifiable information is collected — occupancy is determined from motion, light, and temperature signals only
 
 ---
 
-## IoT Nodes & Sensors
+## Acknowledgements
 
-### Node 1 — Classroom 1 · Motion-Activated Lighting
+**Faculty Mentors:** Dr. Mohamed Abdelraheem · Dr. Ahmed Mostafa
 
-**Hardware:** PIR sensor, ambient lux sensor, temperature sensor, INA219, LED module
+**Fabrication support:** RIT Dubai Mechanical Workshop (3D printing, structural assembly).
 
-| Signal | Direction | Description |
-|---|---|---|
-| `LSS` | Node → DT | Actual light state (ON/OFF) |
-| `motion` | Node → DT | PIR detection (TRUE/FALSE) |
-| `power_w` | Node → DT | INA219 reading (Wh) |
-| `LOS` | DT → Node | Light override signal (ON/OFF) |
-| `LCS` | DT → Node | Light control mode (ON/AUTO) |
-| `CSS` | DT → Node | Class scheduled (TRUE/FALSE) |
+**Course:** ISTE-501/502 Senior Development Project · Department of Electrical Engineering & Computing Sciences · RIT Dubai · 2025–2026
 
 ---
 
-### Node 2 — Classroom 2 · Ambient-Light Lighting
+<div align="center">
 
-**Hardware:** Ambient lux sensor (potentiometer sim), PIR, temperature, INA219, dimmable LED
+**UAE Net-Zero 2050 &nbsp;·&nbsp; Dubai Clean Energy Strategy &nbsp;·&nbsp; RIT Dubai &nbsp;·&nbsp; May 2026**
 
-Lights dim or switch off based on ambient lux thresholds. If `CSS = FALSE` (no class scheduled), lights turn off to conserve energy regardless of sensor values.
-
----
-
-### Node 3 — Large Lecture Hall · Demand Controlled Ventilation
-
-**Hardware:** Occupancy counter, temperature sensor, CO₂ air quality sensor, INA219, servo damper
-
-| Occupancy | Damper Angle | Fan Speed | Reason |
-|---|---|---|---|
-| 0% (empty) | 90° (closed) | 0% | Maximum energy saving |
-| < 50% | 30° (min position) | 40% | Fresh air without waste |
-| ≥ 50% (full house) | 0° (fully open) | 100% | Max cooling for crowd heat + CO₂ |
-
-If `HCS = ON`, damper is forced to 0° and fan to 100% regardless of occupancy.
-
----
-
-### Node 4 — Faculty Office
-
-**Hardware:** PIR, temperature sensor, INA219
-
-| Signal | Direction | Description |
-|---|---|---|
-| `FSS` | DT → Node | Faculty Status Signal (TRUE/FALSE) |
-| `power_w` | Node → DT | INA219 reading |
-
----
-
-### Node 5 — Computer Lab · PC Shutdown After 18:00
-
-**Hardware:** Temperature, humidity, active PC count, LED strips, INA219
-
-| Signal | Direction | Description |
-|---|---|---|
-| `CC` | DT → Node | Campus Clock (HHMM, e.g. 1800 = 6PM) |
-| `CSS` | DT → Node | Class scheduled (TRUE/FALSE) |
-| `power_w` | Node → DT | INA219 — all PCs on 12V bus |
-
-PCs auto-shutdown at `CC = 1800`. Dashboard shows a 30-minute warning. Unauthorised access after 18:00 triggers a critical alert.
-
----
-
-### Node 6 — Mechanical Room · AHU Fan
-
-**Hardware:** 12V DC fan, MOSFET controller, INA219
-
-| Signal | Direction | Description |
-|---|---|---|
-| `damper_angle` | DT → Node | 0–90° (forwarded from Node 3) |
-| `power_w` | Node → DT | AHU power consumption (INA219) |
-
----
-
-## Dashboard Pages
-
-| Route | Page | Description |
-|---|---|---|
-| `/` | Main Dashboard | KPI cards, 3D twin, live alert log, HVAC matrix, power breakdown |
-| `/building` | Building & Rooms | 3D/floor-plan toggle, per-room sensor detail, sparkline charts |
-| `/devices` | Device Twin | All 6 IoT nodes — reported vs desired state diff, signal direction |
-| `/alerts` | Alerts | Real-time alert feed derived from sensor state, historical log, CSV export |
-| `/analytics` | Analytics | D3 temperature chart, energy bar chart, occupancy heatmap |
-| `/twin3d` | 3D Twin (Fullscreen) | Opens in a separate browser tab — no sidebar |
-| `/login` | Login | Firebase email/password authentication |
-
----
-
-## Project Structure
-
-```
-campus-twin/
-├── src/
-│   ├── services/
-│   │   ├── firebase.js          ← Firebase init, auth, all DB subscriptions + writes
-│   │   ├── sensorState.js       ← useLiveSensorState() hook, fallback data, KPI helpers
-│   │   └── exportService.js     ← CSV export with injection sanitisation
-│   ├── components/
-│   │   └── panels/
-│   │       ├── BuildingTwin3D.jsx  ← Three.js 3D model (exterior + interiors + furniture)
-│   │       ├── Layout.jsx          ← Sidebar, topbar, emergency modal
-│   │       ├── Icon.jsx            ← 50+ inline SVG icons (no emojis)
-│   │       └── ProtectedRoute.jsx  ← Auth guard
-│   ├── pages/
-│   │   ├── Dashboard.jsx        ← Main dashboard with 3D twin centrepiece
-│   │   ├── BuildingRooms.jsx    ← Building overview + rooms (merged page)
-│   │   ├── DeviceTwin.jsx       ← IoT device management
-│   │   ├── Alerts.jsx           ← Real-time alert log
-│   │   ├── Analytics.jsx        ← D3 charts from 235K-row synthetic dataset
-│   │   ├── Twin3DPage.jsx       ← Fullscreen 3D tab (no layout wrapper)
-│   │   └── Login.jsx            ← Auth page
-│   ├── context/
-│   │   └── AuthContext.jsx      ← Firebase auth state provider
-│   ├── main.jsx                 ← Routes
-│   └── index.css                ← Global styles, DM Sans font, font-size bump
-├── seedFirebase.js              ← One-time DB seed script (run once after setup)
-├── serviceAccountKey.json       ← ⚠️ DO NOT COMMIT — Firebase admin key
-└── .env.local                   ← ⚠️ DO NOT COMMIT — Firebase credentials
-```
-
----
-
-## Setup & Installation
-
-### 1. Install dependencies
-
-```bash
-cd campus-twin
-npm install
-
-# Required for 3D model
-npm install three @react-three/fiber @react-three/drei
-
-# Required for analytics charts
-npm install d3
-```
-
-### 2. Configure Firebase (see below)
-
-### 3. Run the dev server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173) and log in.
-
----
-
-## Firebase Configuration
-
-### Step 1 — Create a web app
-
-Firebase Console → your project → Project Settings → General → Your apps → `</>` Register app → copy the config object.
-
-### Step 2 — Enable Authentication
-
-Firebase Console → Authentication → Get started → Sign-in method → Email/Password → Enable → Save
-
-Then go to Users → Add user → enter your email + password.
-
-### Step 3 — Enable Realtime Database
-
-Firebase Console → Realtime Database → Create database → Start in test mode → Enable
-
-### Step 4 — Fill `.env.local`
-
-Create `campus-twin/.env.local`:
-
-```env
-VITE_FIREBASE_API_KEY=AIza...
-VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-VITE_FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
-VITE_FIREBASE_PROJECT_ID=your-project-id
-VITE_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
-VITE_FIREBASE_APP_ID=1:123...
-```
-
-> **Twinergy project values:**
-> `AUTH_DOMAIN=twinergy-c8145.firebaseapp.com`
-> `DATABASE_URL=https://twinergy-c8145-default-rtdb.firebaseio.com`
-> `PROJECT_ID=twinergy-c8145`
-
-### Step 5 — Restart the dev server
-
-Vite does not hot-reload `.env.local` — a restart is required after any changes.
-
-```bash
-npm run dev
-```
-
----
-
-## Seeding the Database
-
-Run once after enabling Realtime Database. This writes initial sensor values so the dashboard shows data immediately before real Arduino nodes come online.
-
-```bash
-# 1. Download service account key:
-#    Firebase Console → Project Settings → Service accounts → Generate new private key
-#    Save as serviceAccountKey.json in campus-twin/
-
-# 2. Install admin SDK
-npm install firebase-admin dotenv
-
-# 3. Run the seed script
-node seedFirebase.js
-```
-
-You should see:
-```
-✅  Seed complete! Your dashboard will now show live data.
-```
-
----
-
-## Raspberry Pi Integration
-
-The Pi writes sensor data to Firebase and reads back control signals.
-
-### Writing telemetry (Pi → Firebase)
-
-```python
-import firebase_admin
-from firebase_admin import credentials, db
-import time
-
-cred = credentials.Certificate('serviceAccountKey.json')
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://twinergy-c8145-default-rtdb.firebaseio.com'
-})
-
-# Write Classroom 1 telemetry
-db.reference('telemetry/Classroom_1').update({
-    'lss':           'ON',
-    'motion':        True,
-    'power_w':       28.4,
-    'temperature_c': 23.1,
-    'lux':           420,
-    'lights':        True,
-    'updatedAt':     int(time.time() * 1000)
-})
-```
-
-### Reading control signals (Firebase → Pi → Arduino)
-
-```python
-def on_signal_change(event):
-    data = event.data
-    send_to_arduino(node=1, payload={
-        'LOS': data.get('los'),
-        'LCS': data.get('lcs'),
-        'CSS': data.get('css'),
-    })
-
-db.reference('signals/Classroom_1').listen(on_signal_change)
-```
-
-### Room IDs (match exactly in Firebase paths)
-
-```
-Lobby_Reception
-Classroom_1
-Classroom_2
-Large_Lecture_Hall
-Lounge_Study
-Computer_Lab
-Faculty_Office
-Control_Room
-Mechanical_Room
-```
-
----
-
-## Development Phases
-
-| Phase | Description | Status |
-|---|---|---|
-| Phase 1 | Scaffolding — Vite + React + Tailwind + Firebase + routing | ✅ Complete |
-| Phase 2 | Three.js 3D Building Model — photorealistic exterior, interiors, furniture | ✅ Complete |
-| Phase 4 | Full UI — all 8 pages, mature design, no emojis, SVG icons | ✅ Complete |
-| Phase 5 | D3 Charts — temperature line, energy bar, occupancy heatmap | ✅ Complete |
-| Phase 3 | Firebase Live Data — `useLiveSensorState()` hook, all pages wired | ✅ Complete |
-| Phase 6 | CSV Pipeline — upload 235K-row synthetic dataset to Firebase | 🔲 Pending |
-| Phase 3.5 | Controls — HVAC/lighting/PC write-back to Firebase `/signals` | 🔲 Pending |
-| Phase 7 | Testing & Hardening — error boundaries, security rules, offline | 🔲 Pending |
-| Phase 8 | Deployment — Firebase Hosting, production env, PWA manifest | 🔲 Pending |
-
----
-
-## Security
-
-> ⚠️ **Never commit `.env.local` or `serviceAccountKey.json` to version control.**
-> Add both to `.gitignore` immediately.
-
-### Current state (development)
-
-- Realtime Database is in **test mode** — open read/write for 30 days
-- All dashboard routes are protected by Firebase Authentication via `ProtectedRoute`
-- CSV exports sanitise all cell values against formula injection (cells starting with `=`, `+`, `-`, `@` are prefixed with a tab)
-
-### Production rules (Phase 7)
-
-Replace test mode rules in Firebase Console → Realtime Database → Rules:
-
-```json
-{
-  "rules": {
-    "telemetry":    { ".read": "auth != null", ".write": "auth != null" },
-    "signals":      { ".read": "auth != null", ".write": "auth != null" },
-    "campus_clock": { ".read": "auth != null", ".write": "auth != null" },
-    "alerts":       { ".read": "auth != null", ".write": "auth != null" }
-  }
-}
-```
-
----
-
-## Emergency Contacts (built into dashboard)
-
-| Service | Number |
-|---|---|
-| Dubai Police | 999 |
-| Ambulance / Medical | 998 |
-| Civil Defence (Fire) | 997 |
-| RIT Dubai Admin | +971 4 371 2000 |
-
----
-
-*RIT Dubai · Smart Campus Digital Twin · IoT Capstone 2025–2026*
-*Dubai Silicon Oasis, Academic City, Dubai, UAE*
+</div>
